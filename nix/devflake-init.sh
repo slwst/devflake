@@ -24,7 +24,8 @@ Each step is skipped when already done:
                 build and tests into the flake
 
 Options:
-  --name NAME       herdr session/workspace name (default: the repo directory, sanitized)
+  --name NAME       herdr workspace label and agent name prefix (default: the repo directory,
+                    sanitized)
   --prefix PREFIX   beads issue prefix for `bd init` (default: bd's, the directory name)
   --tools LIST      openspec agent tools (default: claude,codex,opencode)
   --bootstrap       create the bootstrap epic even if the project looks new
@@ -58,7 +59,7 @@ if [[ -z "$name" ]]; then
     sed -E 's/[^a-z0-9_-]+/-/g; s/^[^a-z]+//; s/-+$//' | cut -c1-32)"
   [[ -n "$name" ]] || name=project
 fi
-[[ "$name" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || die "--name must match [a-z][a-z0-9_-]{0,31} (it names the herdr session)"
+[[ "$name" =~ ^[a-z][a-z0-9_-]{0,31}$ ]] || die "--name must match [a-z][a-z0-9_-]{0,31} (it labels the herdr workspace)"
 
 # An existing project has files beyond what devflake and the tools it runs create. Decided before
 # any of them are written.
@@ -187,8 +188,9 @@ cat <<EOF
 
 Next steps:
   1. Review and commit the changes (git status).
-  2. Enter the devshell: \`direnv allow\` or \`nix develop\`. This starts the herdr session
-     '$name' with the parade (mg), captain (claude) and beads (bdi) tabs; attach with \`herdr\`.
+  2. Enter the devshell: \`direnv allow\` or \`nix develop\`. This gives the project a workspace
+     '$name' in the shared herdr session, with the parade (mg), captain (claude) and beads (bdi)
+     tabs; attach with \`herdr\`.
 EOF
 if [[ -n "$epic" ]]; then
   cat <<EOF
