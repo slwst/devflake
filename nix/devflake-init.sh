@@ -86,6 +86,13 @@ if [[ ! -d .beads ]]; then
   if [[ "$head_after" != "$head_before" ]]; then
     note "bd init committed its own files as $(git log -1 --format='%h "%s"')"
   fi
+  # Nothing in the devflake toolchain reads .beads/issues.jsonl -- bdi and mg both drive the bd
+  # CLI -- but bd rewrites the export on every bead change and again in its pre-commit hook,
+  # and `herdr-agents merge` refuses a branch that touches .beads/, so an agent running
+  # `git add -A` would leave itself unable to merge. Only on a fresh init: on a rerun the
+  # project keeps whatever it has chosen.
+  bd config set export.auto false >/dev/null
+  note "turned off beads' JSONL auto-export (export.auto=false in .beads/config.yaml)"
 else
   note "beads already initialized"
 fi

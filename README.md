@@ -53,7 +53,7 @@ devflake-managed skill and AGENTS.md block after a devflake update).
 
 | Step | Result |
 | --- | --- |
-| `bd init` | `.beads/`, the beads sections of AGENTS.md and CLAUDE.md, Claude/Codex/Cursor hooks and the beads skill. bd commits these itself, so it runs first, on a clean index. |
+| `bd init` | `.beads/`, the beads sections of AGENTS.md and CLAUDE.md, Claude/Codex/Cursor hooks and the beads skill. bd commits these itself, so it runs first, on a clean index. On a fresh init only, `export.auto` is then turned off: nothing here reads `.beads/issues.jsonl`, and an agent that commits it cannot merge. |
 | flake | `flake.nix` from the template, named after the directory (`--name` to override). An existing flake without devflake is left alone; the snippet to add is printed. |
 | `.envrc` | `use flake` |
 | `.gitignore` | `/.worktrees/`, `.direnv/`, `/result*`, `.beads/issues.jsonl` |
