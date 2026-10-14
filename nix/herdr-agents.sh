@@ -173,7 +173,8 @@ cmd_spawn() {
   base="${base:-${parent:-HEAD}}"
   git -C "$root" rev-parse --verify --quiet "$base^{commit}" >/dev/null || die "unknown base ref '$base'"
 
-  herdr-up "$root" >/dev/null
+  # Exit 2 is a tab that did not start, which does not stop us needing the session
+  herdr-up "$root" >/dev/null || (($? == 2))
 
   local live_names
   live_names="$(herdr agent list | jq -r '.result.agents[]?.name // empty')"
@@ -357,7 +358,8 @@ cmd_rm() {
   fi
   [[ ${#names[@]} -gt 0 ]] || die "nothing to remove (give agent names or --all)"
 
-  herdr-up "$root" >/dev/null
+  # Exit 2 is a tab that did not start, which does not stop us needing the session
+  herdr-up "$root" >/dev/null || (($? == 2))
   local wts name path ws branch failed=0
   wts="$(herdr worktree list --cwd "$root")"
   for name in "${names[@]}"; do

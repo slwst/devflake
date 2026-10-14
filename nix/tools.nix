@@ -60,6 +60,8 @@ let
 
   # Starts the headless herdr server if needed and ensures the project workspace exists.
   # Usage: herdr-up [project-root] [holder-pid]   (root defaults to the main checkout of the cwd's repo)
+  # Exits 2 when the server and the workspace are up but a tab is not, so that a caller which only
+  # needs the session can carry on; 1 is a harder failure.
   herdr-up = pkgs.writeShellApplication {
     name = "herdr-up";
     runtimeInputs =
@@ -169,12 +171,19 @@ let
       # for a few seconds, resolving the pane afresh each time, and a tab that never comes up fails
       # on its own rather than aborting herdr-up before the tabs after it.
       tab_running() {
-        local label="$1" proc="$2" cmd="$3" info
+        local label="$1" proc="$2" cmd="$3" info created=""
         for _ in $(seq 20); do
           if pane="$(tab_pane "$label" 2>/dev/null)"; then
             if [[ -z "$pane" ]]; then
-              pane="$(herdr tab create --workspace "$ws" --cwd "$root" --label "$label" --no-focus 2>/dev/null |
-                jq -r '.result.root_pane.pane_id // empty')" || pane=""
+              # At most one tab per call: should a listing miss the tab just created, reuse its
+              # pane rather than opening a second tab under the same label
+              if [[ -n "$created" ]]; then
+                pane="$created"
+              else
+                pane="$(herdr tab create --workspace "$ws" --cwd "$root" --label "$label" --no-focus 2>/dev/null |
+                  jq -r '.result.root_pane.pane_id // empty')" || pane=""
+                created="$pane"
+              fi
             fi
             if [[ -n "$pane" ]] && info="$(herdr pane process-info --pane "$pane" 2>/dev/null)"; then
               if jq -e --arg p "$proc" '.result.process_info.foreground_processes[] | select(.name == $p)' \
@@ -213,7 +222,7 @@ let
       tab_running beads bdi "${pkgs.beady-eye}/bin/bdi" || failed=1
 
       echo "herdr: workspace '${name}' in session '$HERDR_SESSION' (attach with: herdr)"
-      exit "$failed"
+      ((!failed)) || exit 2
     '';
   };
 
@@ -336,10 +345,14 @@ let
       _devflake_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")"
       [[ "$_devflake_root" != . ]] || _devflake_root="$PWD"
       if [[ -n "''${DIRENV_IN_ENVRC:-}" ]]; then
-        # direnv has no unload hook; the server keeps running until `herdr-down`
-        herdr-up "$_devflake_root"
+        # direnv has no unload hook; the server keeps running until `herdr-down`. Never fail the
+        # .envrc over a tab that did not start: the devshell itself is fine.
+        herdr-up "$_devflake_root" || true
       else
-        herdr-up "$_devflake_root" $$ && trap "herdr-down ''${_devflake_root@Q} $$" EXIT
+        # herdr-up registers the holder before anything in it can fail, so release it on exit
+        # whatever happened -- herdr-down does nothing when the server is not running
+        trap "herdr-down ''${_devflake_root@Q} $$" EXIT
+        herdr-up "$_devflake_root" $$ || true
       fi
       unset _devflake_root
     fi
