@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "devflake",
+  "project_id": "778c74b8-9215-471e-b090-0ba49725cb8c"
+}
