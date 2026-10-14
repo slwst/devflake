@@ -160,8 +160,10 @@ bd show <id>
   Use `bd-epic` (or defer the beads) to limit what they take.
 - A finished loop (`empty`) leaves the agent idle in its workspace until
   `herdr-agents rm <name>`, unless it was spawned with `--rm-on-empty`.
-- `.beads/issues.jsonl` in the root is a passive export that changes whenever a bead changes.
-  Agents never commit `.beads/` (merge exit 4). Commit it from the root only when asked.
+- `.beads/issues.jsonl` in the root is a passive export that bd rewrites whenever a bead changes,
+  including on every commit. `devflake-init` gitignores it, because `merge` refuses a branch that
+  touches `.beads/` (exit 4) and a stray `git add -A` would otherwise make a branch unmergeable.
+  Agents never commit `.beads/`; beads syncs over Dolt (`bd dolt push`), not through git.
 - A server restart kills the agents and their loop supervisors. Afterwards run
   `herdr-agents rm --all` and respawn.
 - Nix only sees files git tracks: a new file must be `git add`ed before `nix build` or

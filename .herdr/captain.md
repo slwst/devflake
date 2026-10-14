@@ -16,10 +16,12 @@ Step 1 of the briefing above does not apply. devflake's build and checks are alr
 flake, so `devflake-init` was run with `--no-bootstrap` and no `devflake-bootstrap` epic exists.
 Do not create one; `nix flake check` is a real gate here from the start.
 
-**Do not re-run `devflake-init` in this repo.** Its template-naming step is a `sed` over the whole
-of `flake.nix`, and the only match here is the `lib.mkShell` usage example, so a rerun silently
-rewrites `name = "my-project"` in that comment to `name = "devflake"` (tracked as a bug). Test
-changes to init in a throwaway project instead:
+**Re-running `devflake-init` here needs `--no-bootstrap`**, or it creates exactly the epic this
+repo must not have. Everything else about a rerun is idempotent: it refreshes the installed skills
+and the managed block in AGENTS.md and CLAUDE.md, and leaves `flake.nix` alone (its template-naming
+step matches the placeholder only as the assignment the template makes, so the `lib.mkShell` usage
+example in `flake.nix` is not a match). Test changes to init itself in a throwaway project, where
+its first-run paths are reachable:
 
 ```bash
 d=$(mktemp -d) && cd "$d" && git init -q

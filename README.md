@@ -56,7 +56,7 @@ devflake-managed skill and AGENTS.md block after a devflake update).
 | `bd init` | `.beads/`, the beads sections of AGENTS.md and CLAUDE.md, Claude/Codex/Cursor hooks and the beads skill. bd commits these itself, so it runs first, on a clean index. |
 | flake | `flake.nix` from the template, named after the directory (`--name` to override). An existing flake without devflake is left alone; the snippet to add is printed. |
 | `.envrc` | `use flake` |
-| `.gitignore` | `/.worktrees/`, `.direnv/`, `/result*` |
+| `.gitignore` | `/.worktrees/`, `.direnv/`, `/result*`, `.beads/issues.jsonl` |
 | `openspec init` | `openspec/` plus the opsx commands and skills for `--tools` (default `claude,codex,opencode`) |
 | skills | `openspec-to-epic` in `.claude/skills`, `.agents/skills` (and `.opencode/skills`) |
 | AGENTS.md | a devflake block (also in CLAUDE.md), replaced on every run |
