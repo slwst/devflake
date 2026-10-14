@@ -1,4 +1,4 @@
-<!-- BEGIN DEVFLAKE (managed by devflake-init; rerun it to update, edit outside this block) -->
+<!-- BEGIN DEVFLAKE (managed by devflake; devflake-upgrade refreshes it, edit outside this block) -->
 ## Development environment (devflake)
 
 The devshell comes from the `devflake` flake input. `nix develop` (or direnv) provides the
@@ -8,6 +8,8 @@ the project a workspace in the herdr session (attach with `herdr`).
 - Workflow: an OpenSpec change (`openspec/changes/<change>/`) becomes a beads epic with a
   dependency graph of session-sized children (the `openspec-to-epic` skill), which agents work
   through in parallel (`herdr-agents spawn N --preset bd-epic --var epic=<id> --loop`).
+- devflake moves with `nix run github:slwst/devflake#upgrade [REF]`, not a hand edit of the
+  `devflake` input in `flake.nix`: it also refreshes this block and the devflake skills.
 - `nix flake check` is the gate before merging: it runs the tests and linters offline in the Nix
   sandbox. `nix build` builds the project.
 - Nix only sees files git tracks: `git add` new files before `nix build` or `nix flake check`.

@@ -25,6 +25,8 @@ the agent tooling, pinned by devflake's own lock.
    with a dependency graph of session-sized beads (the `openspec-to-epic` skill), and schedule
    agents onto it (`herdr-agents spawn N --preset bd-epic --var epic=<id> --loop`). The captain
    tab is briefed to drive all of this.
+4. **Upgrade.** `nix run github:slwst/devflake#upgrade` moves the project to devflake's latest
+   release tag and refreshes the devflake-managed files.
 
 ## Quick start
 
@@ -49,8 +51,8 @@ writes just `flake.nix` and `.envrc`; then run `nix develop --command devflake-i
 
 ### What `devflake-init` does
 
-Each step is skipped when already done, so rerunning it is safe (and refreshes the
-devflake-managed skill and AGENTS.md block after a devflake update).
+Each step is skipped when already done, so rerunning it is safe. To move to a newer devflake,
+use `devflake-upgrade` (below) rather than rerunning init.
 
 | Step | Result |
 | --- | --- |
@@ -65,10 +67,37 @@ devflake-managed skill and AGENTS.md block after a devflake update).
 
 New files are marked intent-to-add in git so Nix can see them; nothing else is staged or committed.
 
+### Upgrading: `devflake-upgrade`
+
+From the project's root, like init, and from outside the devshell if you like (the devshell is
+what is being replaced, so the command depends on nothing it provides):
+
+```bash
+nix run github:slwst/devflake#upgrade            # the latest release tag
+nix run github:slwst/devflake#upgrade v0.2.0     # a specific ref: a tag, a branch or a commit
+nix run github:slwst/devflake#upgrade -- --dry-run   # report current input, locked rev and target
+```
+
+It is also on the devshell's `PATH` as `devflake-upgrade [REF] [--dry-run]`.
+
+| Step | Result |
+| --- | --- |
+| resolve | Without a REF, the highest `vX.Y.Z` tag of the repository named in the project's current `devflake.url`, so a fork upgrades against itself. The ref is checked to exist on the remote before anything is touched. |
+| rewrite | The `devflake.url = "...";` assignment in `flake.nix`, and nothing else on any other line, becomes `github:<owner>/<repo>/<ref>`. Only `github:owner/repo` and `github:owner/repo/<ref>` inputs are rewritten; any other kind is reported and left alone. |
+| re-lock | `nix flake update devflake`. If it fails, `flake.nix` is restored, so a bad ref leaves the project as it was. |
+| refresh | The skills, the devflake block in AGENTS.md and CLAUDE.md, and the devflake lines in `.gitignore`, from the *new* devflake. New files are marked intent-to-add. |
+| report | The input and the locked rev before and after, the managed files that changed, and the next steps. |
+
+It never stages or commits; review with `git diff`. Then re-enter the devshell (`direnv reload`,
+or exit and `nix develop`): the running one is still the old devflake. If the project had a herdr
+session of its own and the new version shares one, the old server keeps running; find it with
+`herdr session list`, stop it with `herdr session stop <name>` and remove it with
+`herdr session delete <name>`.
+
 ## Using devflake in a flake
 
 ```nix
-inputs.devflake.url = "github:slwst/devflake";
+inputs.devflake.url = "github:slwst/devflake/v0.1.0";
 
 devShells.default = devflake.lib.mkShell {
   inherit pkgs;              # the project's nixpkgs; provides mkShell
@@ -79,14 +108,18 @@ devShells.default = devflake.lib.mkShell {
 };
 ```
 
-`nix flake update devflake` upgrades the tooling. Language recipes for `packages.default` and
+Pin devflake with a tag, as above: the third path component of a `github:` flake ref is the ref
+(a tag, a branch or a commit), and `flake.lock` pins the commit it resolved to either way, so a
+moved tag never silently changes a locked project. `devflake-upgrade` moves the pin and the lock
+together and refreshes the managed files; a hand edit plus `nix flake update devflake` leaves the
+managed files behind. Language recipes for `packages.default` and
 `checks` (Go, Rust, Node, Python, JVM) are in [share/docs/integrating.md](share/docs/integrating.md),
 also available in the devshell as `$DEVFLAKE_SHARE/docs/integrating.md`.
 
 ## Devshell
 
 Entering the devshell puts these on `PATH`: `bd`, `bdi` (beady-eye), `mg` (mardi-gras), `openspec`,
-`claude`, `opencode`, `herdr`, `devflake-init`, the commands below, and the project's `packages`.
+`claude`, `opencode`, `herdr`, `devflake-init`, `devflake-upgrade`, the commands below, and the project's `packages`.
 The devshell's `herdr` must match the server's version, so run herdr commands from the devshell
 or a herdr pane rather than with a herdr installed elsewhere.
 
@@ -196,14 +229,16 @@ briefing with `.herdr/captain.md`.
 
 | Path | Contents |
 | --- | --- |
-| `flake.nix` | the pinned tool set, `lib.mkShell`, `packages.init`, `templates.default` |
+| `flake.nix` | the pinned tool set, `lib.mkShell`, `packages.init`, `packages.upgrade`, `templates.default` |
 | `nix/tools.nix` | per-project scripts: `herdr-up`, `herdr-down`, `herdr-captain`, `herdr-agents`, and the shell hook |
 | `nix/herdr-agents.sh` | `herdr-agents` |
 | `nix/devflake-init.sh` | `devflake-init` |
+| `nix/devflake-upgrade.sh` | `devflake-upgrade` |
+| `nix/project-files.sh` | the devflake-managed project files (skills, the AGENTS.md block, `.gitignore` lines), shared by init and upgrade |
 | `share/captain.md` | the captain briefing (`@project@` is the project name) |
 | `share/prompts/` | built-in presets |
 | `share/bootstrap/` | the bootstrap epic and its beads (`# title`, then description) |
-| `share/skills/` | skills `devflake-init` installs into projects |
+| `share/skills/` | skills `devflake-init` and `devflake-upgrade` install into projects |
 | `share/docs/integrating.md` | language recipes for builds and checks |
 | `templates/default/` | `flake.nix` and `.envrc` for new projects |
 
