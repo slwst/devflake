@@ -86,6 +86,13 @@ if [[ ! -d .beads ]]; then
   if [[ "$head_after" != "$head_before" ]]; then
     note "bd init committed its own files as $(git log -1 --format='%h "%s"')"
   fi
+  # Nothing in the devflake toolchain reads .beads/issues.jsonl -- bdi and mg both drive the bd
+  # CLI -- but bd rewrites the export on every bead change and again in its pre-commit hook,
+  # and `herdr-agents merge` refuses a branch that touches .beads/, so an agent running
+  # `git add -A` would leave itself unable to merge. Only on a fresh init: on a rerun the
+  # project keeps whatever it has chosen.
+  bd config set export.auto false >/dev/null
+  note "turned off beads' JSONL auto-export (export.auto=false in .beads/config.yaml)"
 else
   note "beads already initialized"
 fi
@@ -96,8 +103,13 @@ if [[ ! -e flake.nix ]]; then
   created+=(flake.nix)
   note "wrote flake.nix (project name: $name)"
 elif grep -q devflake flake.nix; then
-  if grep -q '"my-project"' flake.nix; then
-    sed -i "s/\"my-project\"/\"$name\"/g" flake.nix
+  # `nix flake init -t devflake` writes the template verbatim, leaving its placeholder for this
+  # step to name. Match it only as the assignment the template makes, so that nothing else
+  # mentioning the string is touched -- a comment, a usage example (devflake's own flake.nix has
+  # one), or a project that happens to be called my-project.
+  placeholder='^[[:space:]]*(description|name) = "my-project";'
+  if grep -qE "$placeholder" flake.nix; then
+    sed -i -E "/$placeholder/ s/\"my-project\"/\"$name\"/" flake.nix
     note "named the project '$name' in flake.nix"
   else
     note "flake.nix already uses devflake; left as is"
@@ -130,7 +142,10 @@ fi
 
 # --- .gitignore
 ignored=()
-for line in /.worktrees/ .direnv/ /result /result-*; do
+# .beads/issues.jsonl: bd rewrites this export on every commit (its pre-commit hook refreshes it
+# when export.auto is on), and `herdr-agents merge` refuses a branch that touches .beads/, so
+# tracking it would make every agent branch unmergeable.
+for line in /.worktrees/ .direnv/ /result /result-* .beads/issues.jsonl; do
   if ! grep -qxF -- "$line" .gitignore 2>/dev/null; then
     ignored+=("$line")
   fi
@@ -139,7 +154,7 @@ if ((${#ignored[@]})); then
   if [[ -s .gitignore && -n "$(tail -c1 .gitignore)" ]]; then
     echo >>.gitignore
   fi
-  printf '\n# devflake: agent worktrees, direnv, nix build results\n' >>.gitignore
+  printf '\n# devflake: agent worktrees, direnv, nix build results, the beads export\n' >>.gitignore
   printf '%s\n' "${ignored[@]}" >>.gitignore
   note "added to .gitignore: ${ignored[*]}"
 fi

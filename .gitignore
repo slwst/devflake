@@ -63,3 +63,7 @@ Thumbs.db
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# bd rewrites this export on every commit, and `herdr-agents merge` refuses a branch that
+# touches .beads/, so tracking it would make every agent branch unmergeable
+.beads/issues.jsonl
