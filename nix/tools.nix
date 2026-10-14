@@ -60,6 +60,8 @@ let
 
   # Starts the headless herdr server if needed and ensures the project workspace exists.
   # Usage: herdr-up [project-root] [holder-pid]   (root defaults to the main checkout of the cwd's repo)
+  # Exits 2 when the server and the workspace are up but a tab is not, so that a caller which only
+  # needs the session can carry on; 1 is a harder failure.
   herdr-up = pkgs.writeShellApplication {
     name = "herdr-up";
     runtimeInputs =
@@ -110,6 +112,11 @@ let
           # only -- the shellHook above still needs DIRENV_IN_ENVRC to tell a direnv load (no exit
           # hook, so no herdr-down) from an interactive nix develop.
           unset DIRENV_DIR DIRENV_DIFF DIRENV_FILE DIRENV_WATCHES DIRENV_IN_ENVRC
+          # Nor the devshell's scratch directory. nix develop points TMPDIR (and NIX_BUILD_TOP) at a
+          # /tmp/nix-shell.* directory that is removed when that shell exits or direnv reloads; the
+          # server outlives it, so its panes and agents would be left with a TMPDIR that no longer
+          # exists and mktemp fails. Fall back to /tmp like any other long-lived daemon.
+          unset TMPDIR TMP TEMP TEMPDIR NIX_BUILD_TOP
           cd "$root"
           # Panes run $SHELL, which the devshell has replaced with stdenv's bash; use the login shell
           if [[ -n "''${DEVFLAKE_HERDR_SHELL:-}" ]]; then
@@ -147,28 +154,55 @@ let
           jq -r '.result.workspace.workspace_id')"
       fi
 
+      # Prints the pane of the tab labelled $1, or nothing when there is no such tab; fails when
+      # herdr cannot list them.
+      tab_pane() {
+        local tab
+        tab="$(herdr tab list --workspace "$ws" |
+          jq -r --arg l "$1" '[.result.tabs[] | select(.label == $l)][0].tab_id // empty')" || return
+        herdr pane list --workspace "$ws" |
+          jq -r --arg t "$tab" '[.result.panes[] | select(.tab_id == $t)][0].pane_id // empty'
+      }
+
       # Ensures a tab labelled $1 whose pane runs $3, a process named $2, and leaves its pane in $pane.
       # A restored tab comes back as a bare shell, so start it whenever it is not running.
+      # A stopped server restores its saved workspaces asynchronously and can list a pane before it
+      # is live, when process-info and run both answer pane_not_found. So the whole step is retried
+      # for a few seconds, resolving the pane afresh each time, and a tab that never comes up fails
+      # on its own rather than aborting herdr-up before the tabs after it.
       tab_running() {
-        local label="$1" proc="$2" cmd="$3"
-        pane="$(herdr pane list --workspace "$ws" |
-          jq -r --arg t "$(herdr tab list --workspace "$ws" |
-            jq -r --arg l "$label" '[.result.tabs[] | select(.label == $l)][0].tab_id // empty')" \
-            '[.result.panes[] | select(.tab_id == $t)][0].pane_id // empty')"
-        if [[ -z "$pane" ]]; then
-          pane="$(herdr tab create --workspace "$ws" --cwd "$root" --label "$label" --no-focus |
-            jq -r '.result.root_pane.pane_id')"
-        fi
-        if ! herdr pane process-info --pane "$pane" |
-          jq -e --arg p "$proc" '.result.process_info.foreground_processes[] | select(.name == $p)' >/dev/null; then
-          herdr pane run "$pane" "$cmd" >/dev/null
-        fi
+        local label="$1" proc="$2" cmd="$3" info created=""
+        for _ in $(seq 20); do
+          if pane="$(tab_pane "$label" 2>/dev/null)"; then
+            if [[ -z "$pane" ]]; then
+              # At most one tab per call: should a listing miss the tab just created, reuse its
+              # pane rather than opening a second tab under the same label
+              if [[ -n "$created" ]]; then
+                pane="$created"
+              else
+                pane="$(herdr tab create --workspace "$ws" --cwd "$root" --label "$label" --no-focus 2>/dev/null |
+                  jq -r '.result.root_pane.pane_id // empty')" || pane=""
+                created="$pane"
+              fi
+            fi
+            if [[ -n "$pane" ]] && info="$(herdr pane process-info --pane "$pane" 2>/dev/null)"; then
+              if jq -e --arg p "$proc" '.result.process_info.foreground_processes[] | select(.name == $p)' \
+                <<<"$info" >/dev/null || herdr pane run "$pane" "$cmd" >/dev/null 2>&1; then
+                return 0
+              fi
+            fi
+          fi
+          sleep 0.25
+        done
+        echo "herdr-up: could not start the '$label' tab (pane ''${pane:-unresolved} not found)" >&2
+        return 1
       }
 
       # Tabs are listed in creation order (herdr cannot move them): parade, captain, beads.
       # A restored workspace keeps the order it was saved with.
+      failed=0
       # mardi-gras in a "parade" tab: the beads as a parade of rolling, lined up, stalled, and closed
-      tab_running parade mg "${pkgs.mardi-gras}/bin/mg"
+      tab_running parade mg "${pkgs.mardi-gras}/bin/mg" || failed=1
       # claude briefed on the agent tooling in a "captain" tab, who runs the parade; nix's
       # wrapper leaves the real binary as .claude-unwrapped, which the kernel truncates to 15 characters
       if [[ "''${DEVFLAKE_CAPTAIN:-1}" != 0 ]]; then
@@ -176,15 +210,19 @@ let
         # (re)starts claude; a claude that is still running is left alone
         captain=("${herdr-captain}/bin/herdr-captain")
         [[ "''${DEVFLAKE_CAPTAIN_NEW:-0}" == 0 ]] || captain+=(--new)
-        tab_running captain .claude-unwrapp "$(printf '%q ' "''${captain[@]}" "$root")"
-        # Name the pane in beady-eye, which otherwise lists it with no agent (it holds no bead)
-        herdr pane report-metadata "$pane" --source herdr:claude --display-agent captain \
-          --title captain >/dev/null || true
+        if tab_running captain .claude-unwrapp "$(printf '%q ' "''${captain[@]}" "$root")"; then
+          # Name the pane in beady-eye, which otherwise lists it with no agent (it holds no bead)
+          herdr pane report-metadata "$pane" --source herdr:claude --display-agent captain \
+            --title captain >/dev/null || true
+        else
+          failed=1
+        fi
       fi
       # beady-eye in a "beads" tab: bead trees with each claiming agent's pane beside its bead
-      tab_running beads bdi "${pkgs.beady-eye}/bin/bdi"
+      tab_running beads bdi "${pkgs.beady-eye}/bin/bdi" || failed=1
 
       echo "herdr: workspace '${name}' in session '$HERDR_SESSION' (attach with: herdr)"
+      ((!failed)) || exit 2
     '';
   };
 
@@ -307,10 +345,14 @@ let
       _devflake_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")"
       [[ "$_devflake_root" != . ]] || _devflake_root="$PWD"
       if [[ -n "''${DIRENV_IN_ENVRC:-}" ]]; then
-        # direnv has no unload hook; the server keeps running until `herdr-down`
-        herdr-up "$_devflake_root"
+        # direnv has no unload hook; the server keeps running until `herdr-down`. Never fail the
+        # .envrc over a tab that did not start: the devshell itself is fine.
+        herdr-up "$_devflake_root" || true
       else
-        herdr-up "$_devflake_root" $$ && trap "herdr-down ''${_devflake_root@Q} $$" EXIT
+        # herdr-up registers the holder before anything in it can fail, so release it on exit
+        # whatever happened -- herdr-down does nothing when the server is not running
+        trap "herdr-down ''${_devflake_root@Q} $$" EXIT
+        herdr-up "$_devflake_root" $$ || true
       fi
       unset _devflake_root
     fi

@@ -138,6 +138,8 @@ bd list --status=in_progress --json | jq '.[] | {id, assignee, pane: .metadata.a
 bd show <id>
 ```
 
+- Publish beads with `bd dolt push` the first time (it creates `refs/dolt/data`; `bd sync` fails
+  without it) and with `bd sync` thereafter.
 - An agent's `BEADS_ACTOR` is its name, so agents' claims show `assignee` = agent name.
 - A **stale claim** is an in_progress bead with any of these:
   - assigned to the git user (`git config user.name`) or to an agent with no worktree or live
