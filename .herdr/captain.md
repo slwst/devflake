@@ -50,8 +50,9 @@ nix develop --command herdr-agents ...
 - `herdr-up` runs on every interactive devshell entry. If a change to it or to `nix/tools.nix` is
   broken, entry fails and the session will not come up. Recovery: `DEVFLAKE_HERDR=0 nix develop`
   gives the tools with no server management, from where it can be fixed and re-checked.
-- Stopping the server kills this captain tab along with every agent, so prefer
-  `herdr-agents rm <name>` over `herdr-down` while working here.
+- `herdr-down` closes this captain tab along with every agent in the repository, and
+  `herdr-down --all` stops the server, killing the agents of every *other* devflake project
+  sharing the session too. Prefer `herdr-agents rm <name>` while working here.
 - `nix flake check` builds all five scripts through shellcheck and runs `checks.fmt` (nixfmt over
   the `.nix` files). It is the cheap way to catch a broken script *before* it reaches a devshell —
   run it on every edit under `nix/`.

@@ -2,8 +2,9 @@
 
 A Nix flake that gives any project, in any language, an agentic development environment:
 
-- **herdr**: a headless terminal-multiplexer session per project, with tabs for the bead parade
-  (`mg`), a captain (`claude` briefed on the agent tooling), and beady-eye (`bdi`);
+- **herdr**: a headless terminal multiplexer, where each project gets a workspace with tabs for
+  the bead parade (`mg`), a captain (`claude` briefed on the agent tooling), and beady-eye
+  (`bdi`), all in one session so a single `herdr` shows every project you have open;
 - **beads** (`bd`): the issue tracker agents claim and close work in;
 - **openspec**: specs for changes, which become bead epics;
 - **herdr-agents**: spawns coding agents (claude, codex, opencode) into their own git worktrees
@@ -71,7 +72,8 @@ inputs.devflake.url = "github:slwst/devflake";
 
 devShells.default = devflake.lib.mkShell {
   inherit pkgs;              # the project's nixpkgs; provides mkShell
-  name = "my-project";       # herdr session and workspace name: [a-z][a-z0-9_-]{0,31}
+  name = "my-project";       # herdr workspace label, agent name prefix: [a-z][a-z0-9_-]{0,31}
+  # session = "my-project";  # a herdr session of its own, instead of the shared one
   packages = [ pkgs.go ];    # the project's toolchain
   # anything else (inputsFrom, env vars, ...) goes to pkgs.mkShell; shellHook runs after devflake's
 };
@@ -90,26 +92,34 @@ or a herdr pane rather than with a herdr installed elsewhere.
 
 ### herdr session
 
-An interactive `nix develop` (or direnv) starts a headless herdr server for the session named
-after the project, with a workspace of the same name at the repo root, whose `parade` tab runs
-`mg`, `captain` tab runs `claude`, and `beads` tab runs `bdi`, in that order (each restarted on
-entry if it is not running). The server stops when the last devshell exits; its workspaces are
-restored on the next start. Panes run your login shell with the devshell environment.
+An interactive `nix develop` (or direnv) starts a headless herdr server if one is not running and
+gives the project a workspace at the repo root, labelled after it, whose `parade` tab runs `mg`,
+`captain` tab runs `claude`, and `beads` tab runs `bdi`, in that order (each restarted on entry if
+it is not running). Panes run your login shell with the devshell environment.
+
+Every devflake project shares one session, named `devflake`, so a single `herdr` shows them all
+side by side and the sidebar rolls up which project needs attention. This is herdr's own model:
+one workspace per repo, named sessions only when you need completely separate panes, sockets and
+runtime state. A project that does need that — its agents must not be able to read or drive the
+panes of the other projects open on the host, since herdr scopes nothing within a session — takes
+a session of its own with `session` in `mkShell` or `DEVFLAKE_HERDR_SESSION` in its `.envrc`.
 
 | Command | Description |
 | --- | --- |
-| `herdr` | Attach to the project session (`HERDR_SESSION` is set by the devshell). |
+| `herdr` | Attach to the session (`HERDR_SESSION` is set by the devshell). |
 | `herdr-up [root] [pid]` | Start the server if needed and ensure the project workspace and its `parade`, `captain`, and `beads` tabs. Run automatically on entry. |
 | `herdr-captain [--new] root` | Run `claude` with the captain briefing (devflake's, then the project's `.herdr/captain.md`), resuming the root's last conversation (`--new`: start a new one). The captain tab runs it. |
-| `herdr-down [pid]` | Stop the server (with a pid: only once no other devshell holds it). Run automatically on exit. |
+| `herdr-down [--all] [root] [pid]` | Take the project out of the session: close its workspaces, and stop the server once no other project's is left. With a pid, only once no other devshell holds the session; `--all` stops the server regardless. Run automatically on exit. |
 
 - direnv has no exit hook, so a server started through direnv runs until `herdr-down`.
 - `nix develop --command ...` does not start a server, and shells inside herdr panes leave it alone.
-- Stopping the server stops every agent in it.
+- `herdr-down` closes the project's workspaces rather than saving them, and stopping the server
+  stops every agent in it — in the shared session, every project's.
 
 | Variable | Effect |
 | --- | --- |
 | `DEVFLAKE_HERDR=0` | Do not start or stop the herdr server. |
+| `DEVFLAKE_HERDR_SESSION` | herdr session for this project (default: `devflake`, shared by all of them). |
 | `DEVFLAKE_HERDR_SHELL` | Shell for herdr panes (default: your login shell). |
 | `DEVFLAKE_CAPTAIN=0` | Leave out the captain tab. |
 | `DEVFLAKE_CAPTAIN_NEW=1` | Start a new captain conversation instead of resuming, when entry (re)starts `claude` in the tab. |
@@ -119,7 +129,9 @@ restored on the next start. Panes run your login shell with the devshell environ
 
 Each agent gets a git worktree at `.worktrees/<name>` (gitignored) on a new branch
 `agents/<name>`, a herdr workspace, and an agent started in its pane with `BEADS_ACTOR=<name>`,
-so its claims and closes are recorded as that agent rather than your git user.
+so its claims and closes are recorded as that agent rather than your git user. Names are
+`<project>-1`, `<project>-2`, ... because herdr agent names are unique across the session, which
+projects share.
 
 | Command | Description |
 | --- | --- |
@@ -136,7 +148,7 @@ so its claims and closes are recorded as that agent rather than your git user.
 | Option | Default | Description |
 | --- | --- | --- |
 | `-k, --kind KIND` | `claude` | Agent kind for `herdr agent start` (`codex`, `opencode`, ...). |
-| `-n, --name PREFIX` | `agent` | Agents are named `PREFIX-1`, `PREFIX-2`, ... (next free numbers). |
+| `-n, --name PREFIX` | the project name | Agents are named `PREFIX-1`, `PREFIX-2`, ... (next free numbers). |
 | `--parent BRANCH` | root's branch | Branch the agents merge into, recorded as the agent branch's upstream. |
 | `-b, --base REF` | parent | Commit to branch from. |
 | `-p, --preset NAME` | | Prompt from `.herdr/prompts/NAME.md`, else the built-in preset `NAME`. |

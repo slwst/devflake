@@ -1,17 +1,29 @@
-# The per-project herdr tooling: everything here is keyed on the project name, which is the herdr
-# session, the label of its main workspace, and the project beady-eye is told about.
+# The per-project herdr tooling. `name` is the project: the label of its herdr workspace, the
+# prefix its agents are named with, and the project beady-eye is told about. `session` is the
+# herdr session that workspace lives in, shared with every other devflake project by default.
 # `pkgs` is devflake's own package set (with the herdr, beady-eye, mardi-gras overlays).
 {
   pkgs,
   name,
+  session,
   share,
 }:
 
 let
   inherit (pkgs) lib;
 
-  # Shell PIDs holding the herdr session open; the server stops when the last one exits
-  herdrHoldersDir = ''"''${XDG_RUNTIME_DIR:-/tmp}/herdr-${name}-$(id -u)/holders"'';
+  # The herdr session, as every script and the shell hook resolve it. One session shared by all of
+  # the host's devflake projects is herdr's own model -- "use one workspace per repo [...] use
+  # named sessions when you need completely separate panes, sockets, and persisted runtime state"
+  # -- so a single `herdr` shows every project, each as its own workspace. A project that needs
+  # that separation sets DEVFLAKE_HERDR_SESSION in its .envrc, or `session` in devflake.lib.mkShell;
+  # the reason to is isolation, since herdr scopes nothing within a session and agents have the
+  # herdr CLI, so an agent can read and drive any pane of any project sharing the session.
+  herdrSession = ''"''${DEVFLAKE_HERDR_SESSION:-${session}}"'';
+
+  # Shell PIDs holding the herdr session open; the server stops when the last one exits. Keyed on
+  # the session, so in the shared one a holder from any project keeps it up.
+  herdrHoldersDir = ''"''${XDG_RUNTIME_DIR:-/tmp}/herdr-$HERDR_SESSION-$(id -u)/holders"'';
 
   # The captain's built-in briefing, with the project name filled in
   captainBriefing = pkgs.writeText "${name}-captain.md" (
@@ -71,7 +83,7 @@ let
           { echo "herdr-up: not inside a git repository; pass the project root" >&2; exit 1; }
         root="$(dirname "$common")"
       fi
-      export HERDR_SESSION=${name}
+      export HERDR_SESSION=${herdrSession}
 
       running() {
         herdr session list --json 2>/dev/null \
@@ -124,9 +136,12 @@ let
         fi
       fi
 
-      # A stopped server restores its saved workspaces, so only create the workspace when missing
-      ws="$(herdr workspace list |
-        jq -r --arg l ${name} '[.result.workspaces[] | select(.label == $l)][0].workspace_id // empty')"
+      # A stopped server restores its saved workspaces, so only create the workspace when missing.
+      # Found through the repository, not by label: the session holds every project, and two of
+      # them can be called the same thing. Not through a workspace's own .worktree either -- the
+      # server only fills that in while an attached client asks the sidebar for git status.
+      ws="$(herdr worktree list --cwd "$root" 2>/dev/null |
+        jq -r --arg root "$root" '[.result.worktrees[]? | select(.path == $root)][0].open_workspace_id // empty')"
       if [[ -z "$ws" ]]; then
         ws="$(herdr workspace create --cwd "$root" --label ${name} --no-focus |
           jq -r '.result.workspace.workspace_id')"
@@ -169,36 +184,80 @@ let
       # beady-eye in a "beads" tab: bead trees with each claiming agent's pane beside its bead
       tab_running beads bdi "${pkgs.beady-eye}/bin/bdi"
 
-      echo "herdr: session '$HERDR_SESSION' running (attach with: herdr)"
+      echo "herdr: workspace '${name}' in session '$HERDR_SESSION' (attach with: herdr)"
     '';
   };
 
-  # Releases a holder and stops the server once no live holders remain.
-  # Usage: herdr-down [holder-pid]   (no pid: stop unconditionally)
+  # Takes the project out of the herdr session, and stops the server once nothing is left in it.
+  # Usage: herdr-down [--all] [project-root] [holder-pid]   (root defaults to the cwd's repo)
+  # With a holder pid it does nothing while another devshell still holds the session. Otherwise it
+  # closes this repository's workspaces -- the project's tabs and any agents in them -- and stops
+  # the server only once no other project's workspace is left. --all stops it regardless.
   herdr-down = pkgs.writeShellApplication {
     name = "herdr-down";
     runtimeInputs = with pkgs; [
       coreutils
+      git
       herdr
+      jq
     ];
     text = ''
-      export HERDR_SESSION=${name}
+      export HERDR_SESSION=${herdrSession}
       holders=${herdrHoldersDir}
 
-      if [[ -n "''${1:-}" ]]; then
-        rm -f "$holders/$1"
-        for f in "$holders"/*; do
-          [[ -e "$f" ]] || continue
-          if kill -0 "$(basename "$f")" 2>/dev/null; then
-            exit 0
-          fi
-          rm -f "$f"
-        done
-      else
+      all=0
+      if [[ "''${1:-}" == --all ]]; then
+        all=1
+        shift
+      fi
+      root="''${1:-}"
+      holder="''${2:-}"
+
+      [[ -z "$holder" ]] || rm -f "$holders/$holder"
+
+      stop_server() {
         rm -rf "$holders"
+        herdr server stop >/dev/null 2>&1 || true
+      }
+
+      if ((all)); then
+        stop_server
+        exit 0
       fi
 
-      herdr server stop >/dev/null 2>&1 || true
+      # Any holder still alive keeps the session up; drop the ones that are not
+      for f in "$holders"/*; do
+        [[ -e "$f" ]] || continue
+        if kill -0 "$(basename "$f")" 2>/dev/null; then
+          exit 0
+        fi
+        rm -f "$f"
+      done
+
+      herdr session list --json 2>/dev/null |
+        jq -e --arg s "$HERDR_SESSION" '.sessions[] | select(.name == $s and .running)' >/dev/null ||
+        exit 0
+
+      if [[ -z "$root" ]]; then
+        common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ||
+          { echo "herdr-down: not inside a git repository; pass the project root, or --all" >&2; exit 1; }
+        root="$(dirname "$common")"
+      fi
+
+      # Every workspace open on this repository: the project's, and one per agent worktree.
+      # Closed, not saved -- a stopped server restores its workspaces, but their tabs come back as
+      # bare shells that the next `herdr-up` restarts anyway, and the captain resumes its
+      # conversation from the project root whichever way round it goes.
+      while read -r ws; do
+        [[ -n "$ws" ]] || continue
+        herdr workspace close "$ws" >/dev/null 2>&1 || true
+      done < <(herdr worktree list --cwd "$root" 2>/dev/null |
+        jq -r '.result.worktrees[]?.open_workspace_id // empty')
+
+      # Nothing any other project put there is left
+      if [[ "$(herdr workspace list | jq '.result.workspaces | length')" == 0 ]]; then
+        stop_server
+      fi
     '';
   };
 
@@ -219,8 +278,8 @@ let
       util-linux # column, flock, setsid
     ];
     text = ''
-      export HERDR_SESSION=${name}
-      bdi_project=${name}
+      export HERDR_SESSION=${herdrSession}
+      project=${name}
       builtin_presets=${share}/prompts
       ${builtins.readFile ./herdr-agents.sh}
     '';
@@ -231,9 +290,10 @@ let
     export DEVFLAKE_PROJECT=${name}
     export DEVFLAKE_SHARE=${share}
 
-    # Point herdr at the project session, unless already inside a pane of some herdr session
+    # Point herdr at the session the project's workspace lives in, unless already inside a pane
+    # of some herdr session
     if [[ -z "''${HERDR_PANE_ID:-}" ]]; then
-      export HERDR_SESSION=${name}
+      export HERDR_SESSION=${herdrSession}
     fi
 
     if [[ ! -d .beads && -z "''${HERDR_PANE_ID:-}" ]]; then
@@ -250,7 +310,7 @@ let
         # direnv has no unload hook; the server keeps running until `herdr-down`
         herdr-up "$_devflake_root"
       else
-        herdr-up "$_devflake_root" $$ && trap 'herdr-down '"$$" EXIT
+        herdr-up "$_devflake_root" $$ && trap "herdr-down ''${_devflake_root@Q} $$" EXIT
       fi
       unset _devflake_root
     fi

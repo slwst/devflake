@@ -66,8 +66,8 @@ Conventions & Patterns — in one place, @AGENTS.md, so the two files cannot dri
 ## Development environment (devflake)
 
 The devshell comes from the `devflake` flake input. `nix develop` (or direnv) provides the
-project's toolchain plus `bd` (beads), `openspec`, `claude`, `herdr` and `herdr-agents`, and
-starts the project's herdr session (attach with `herdr`).
+project's toolchain plus `bd` (beads), `openspec`, `claude`, `herdr` and `herdr-agents`, and gives
+the project a workspace in the herdr session (attach with `herdr`).
 
 - Workflow: an OpenSpec change (`openspec/changes/<change>/`) becomes a beads epic with a
   dependency graph of session-sized children (the `openspec-to-epic` skill), which agents work
@@ -83,6 +83,9 @@ starts the project's herdr session (attach with `herdr`).
   or deleting a row later does not unpublish it. Keep credentials, tokens, customer data and
   private hostnames out of beads — reference where a value lives, never the value.
 - `bd update --notes` **replaces** a bead's notes; use `--append-notes` to add to them.
+- The herdr session is shared with every other devflake project open on the host, each in its own
+  workspace, and herdr scopes nothing within a session. Panes outside this repository's workspaces
+  are not yours: check `worktree.repo_root` in `herdr workspace list` before acting on a pane.
 - The herdr tooling belongs to devflake. Project-specific agent presets go in
   `.herdr/prompts/<name>.md` (they shadow built-in presets of the same name), and notes for
   the captain tab in `.herdr/captain.md`.

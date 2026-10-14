@@ -93,11 +93,17 @@ herdr-agents presets                      # presets (project and built-in) and t
 
 ## herdr server
 
-- `HERDR_SESSION=@project@` (set by the devshell). `herdr` attaches to the session.
+- `HERDR_SESSION` (set by the devshell) is `devflake` unless the project opted out with
+  `session` in `mkShell` or `DEVFLAKE_HERDR_SESSION`. One session holds every devflake project on
+  the host, each as its own workspace, so `herdr` shows them all and panes you did not open may
+  belong to another repository. Check a workspace's `worktree.repo_root` in
+  `herdr workspace list` before reading or running anything in its panes; @project@ is at the
+  repo root you were started in.
 - `herdr-up [root] [pid]` starts the server if needed and ensures the `@project@` workspace and
   its tabs, in order `parade`=mg, `captain`=claude, `beads`=bdi. An interactive
-  `nix develop` runs it on entry, and `herdr-down [pid]` on exit. The server stops when the last
-  holder exits, and stopping it stops every agent. direnv never runs `herdr-down`.
+  `nix develop` runs it on entry, and `herdr-down [root] [pid]` on exit, which closes this
+  project's workspaces and stops the server only once no other project's is left (`--all` stops
+  it regardless, killing every project's agents). direnv never runs `herdr-down`.
   `DEVFLAKE_HERDR=0` disables this management.
 - The captain tab resumes the root's last conversation (`claude --continue`), so a briefing
   change only reaches a new one: `DEVFLAKE_CAPTAIN_NEW=1` on entry, or `herdr-captain --new`.

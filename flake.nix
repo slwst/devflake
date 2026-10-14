@@ -74,13 +74,19 @@
         if builtins.match "[a-z][a-z0-9_-]{0,31}" name != null then
           name
         else
-          throw "devflake: name '${name}' must match [a-z][a-z0-9_-]{0,31} (it names the herdr session)";
+          throw "devflake: name '${name}' must match [a-z][a-z0-9_-]{0,31} (it names a herdr session or workspace)";
+
+      # Every devflake project shares one herdr session by default, so a single `herdr` shows them
+      # all, each as its own workspace. `session` in mkShell (or DEVFLAKE_HERDR_SESSION) opts a
+      # project out into its own.
+      defaultSession = "devflake";
 
       mkTools =
-        system: name:
+        system: name: session:
         import ./nix/tools.nix {
           pkgs = pkgsFor system;
           name = checkName name;
+          session = checkName session;
           inherit share;
         };
 
@@ -122,9 +128,14 @@
         #
         #   devShells.default = devflake.lib.mkShell {
         #     inherit pkgs;            # the project's nixpkgs (provides mkShell)
-        #     name = "my-project";     # herdr session/workspace name
+        #     name = "my-project";     # herdr workspace label and agent name prefix
         #     packages = [ pkgs.go ];  # the project's toolchain
         #   };
+        #
+        # `session` names the herdr session the workspace lives in; it defaults to the one every
+        # devflake project shares, so that one `herdr` shows them all. Set it (to the project name,
+        # say) for a repository whose agents must not be able to read or drive the panes of the
+        # other projects open on the host -- herdr scopes nothing within a session.
         #
         # Any other attribute (inputsFrom, env vars, ...) is passed to pkgs.mkShell; shellHook runs
         # after devflake's.
@@ -132,6 +143,7 @@
           {
             pkgs,
             name,
+            session ? defaultSession,
             packages ? [ ],
             shellHook ? "",
             ...
@@ -139,12 +151,13 @@
           let
             system = pkgs.stdenv.hostPlatform.system;
             p = pkgsFor system;
-            tools = mkTools system name;
+            tools = mkTools system name session;
           in
           pkgs.mkShell (
             removeAttrs args [
               "pkgs"
               "name"
+              "session"
               "packages"
               "shellHook"
             ]
@@ -174,7 +187,7 @@
       let
         p = pkgsFor system;
         init = mkInit p;
-        tools = mkTools system "devflake";
+        tools = mkTools system "devflake" defaultSession;
       in
       {
         packages = {
