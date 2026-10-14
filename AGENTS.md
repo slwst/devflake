@@ -55,7 +55,7 @@ works from a clean checkout, and there is no generated lock data to regenerate b
 
 | Command | What it does |
 | --- | --- |
-| `nix flake check` | The gate before merging: builds `packages.init` and the four `herdr-*` scripts, running shellcheck on each, and checks that the `.nix` files are nixfmt-formatted. |
+| `nix flake check` | The gate before merging: builds `packages.init`, `packages.upgrade` and the four `herdr-*` scripts, running shellcheck on each, and checks that the `.nix` files are nixfmt-formatted. |
 | `nix build` | Builds `packages.default` (`devflake-init`); check it with `./result/bin/devflake-init --help`. |
 | `nix develop` | devflake's own devshell, which is itself a devflake shell (`self.lib.mkShell`), so it gives devflake a workspace in the shared herdr session. |
 | `nix fmt` | Formats the `.nix` files with nixfmt (`formatter = nixfmt-tree`). |
@@ -67,7 +67,7 @@ works from a clean checkout, and there is no generated lock data to regenerate b
 - `nix flake check` checks the current system only. `--all-systems` also evaluates the darwin and
   aarch64 outputs, which need a builder for those systems to go further than evaluation.
 - There is no test suite beyond the checks. Shellcheck catches quoting and syntax, not behaviour,
-  so after changing `nix/herdr-agents.sh` or `nix/devflake-init.sh` run the command from a devshell
+  so after changing `nix/herdr-agents.sh`, `nix/devflake-init.sh` or `nix/devflake-upgrade.sh` run the command from a devshell
   as well as `nix flake check`.
 - `DEVFLAKE_HERDR=0 nix develop` gives the tools without starting a herdr server.
 - Three of beady-eye's tests are skipped on darwin, in an overlay in `flake.nix` that explains why.
