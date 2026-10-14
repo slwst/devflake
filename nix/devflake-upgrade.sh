@@ -1,7 +1,9 @@
 # devflake-upgrade: move a project's devflake input to a newer ref.
 # Packaged by devflake's flake.nix via writeShellApplication, which sets $share and $cmd and sources
-# project-files.sh (die, note and the devflake-managed files) ahead of this script. It depends only
-# on its runtimeInputs, so it runs from outside the project's devshell -- the thing being replaced.
+# project-files.sh (die, note and the devflake-managed files) ahead of this script, and $rev, the
+# commit it was built from. It depends only on its runtimeInputs, so it runs from outside the
+# project's devshell -- the thing being replaced -- with one exception: the re-lock uses the nix
+# the user invoked it with, which is the one that works with their daemon, config and lockfile.
 
 usage() {
   cat <<'EOF'
@@ -37,6 +39,9 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git rep
 cd "$root"
 [[ -e flake.nix ]] || die "no flake.nix in $root; is this a devflake project? (devflake-init sets one up)"
 
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
 # --- the current input. Only the assignment itself, anchored, so that a comment or any other
 # mention of the string is never read or rewritten.
 assign_re='^[[:space:]]*(inputs\.)?devflake\.url = "([^"]*)";'
@@ -56,12 +61,14 @@ else
 fi
 remote="https://github.com/$owner/$repo.git"
 
-# The rev flake.lock holds for the devflake input (a root input naming its node), if locked
-locked_rev=""
-if [[ -e flake.lock ]]; then
-  locked_rev="$(jq -r '.root as $r | .nodes as $n | ($n[$r].inputs.devflake // empty) as $i
-    | if ($i | type) == "string" then $n[$i].locked.rev // empty else empty end' flake.lock 2>/dev/null || true)"
-fi
+# lock_rev: the rev flake.lock holds for the devflake input (a root input naming its node), or
+# nothing when it is not locked
+lock_rev() {
+  [[ -e flake.lock ]] || return 0
+  jq -r '.root as $r | .nodes as $n | ($n[$r].inputs.devflake // empty) as $i
+    | if ($i | type) == "string" then $n[$i].locked.rev // empty else empty end' flake.lock 2>/dev/null || true
+}
+locked_rev="$(lock_rev)"
 
 # ls_remote ARGS...: git ls-remote against the repository, failing with a readable message
 ls_remote() {
@@ -82,10 +89,8 @@ else
   [[ "$ref" =~ ^$ref_chars$ ]] || die "'$ref' is not a ref devflake-upgrade can write into github:$owner/$repo/<ref>"
   if [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
     # A commit is not listed by ls-remote; fetching it is the only check GitHub allows
-    tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' EXIT
-    git init -q --bare "$tmp"
-    GIT_TERMINAL_PROMPT=0 git -C "$tmp" fetch -q --depth 1 "$remote" "$ref" 2>/dev/null ||
+    git init -q --bare "$work/probe"
+    GIT_TERMINAL_PROMPT=0 git -C "$work/probe" fetch -q --depth 1 "$remote" "$ref" 2>/dev/null ||
       die "commit $ref not found in $owner/$repo (or $remote could not be reached)"
   else
     refs="$(ls_remote --tags --heads)"
@@ -105,6 +110,20 @@ if ((dry_run)); then
   exit 0
 fi
 
+command -v nix >/dev/null || die "nix is not on PATH; it is needed to re-lock the devflake input"
+
+# The flake files as they were, restored if the re-lock fails so a bad ref changes nothing
+cp -f flake.nix "$work/flake.nix"
+[[ ! -e flake.lock ]] || cp -f flake.lock "$work/flake.lock"
+restore() {
+  cp -f "$work/flake.nix" flake.nix
+  if [[ -e "$work/flake.lock" ]]; then
+    cp -f "$work/flake.lock" flake.lock
+  else
+    rm -f flake.lock
+  fi
+}
+
 # --- rewrite the assignment's quoted value, on that one line only
 if [[ "$current" == "$target" ]]; then
   note "devflake.url is already $target"
@@ -112,3 +131,75 @@ else
   sed -i -E "${lineno}s|^([[:space:]]*(inputs\\.)?devflake\\.url = \")[^\"]*(\";)|\\1$target\\3|" flake.nix
   note "flake.nix: devflake.url $current -> $target"
 fi
+
+# --- re-lock. Done here rather than left to the next evaluation, so that a ref which does not
+# evaluate is caught now and the move can be reported. Older nix has no `flake update INPUT`.
+nix_flake() { nix --extra-experimental-features 'nix-command flakes' flake "$@"; }
+note "re-locking the devflake input"
+if ! out="$(nix_flake update devflake 2>&1)" &&
+  ! out_old="$(nix_flake lock --update-input devflake 2>&1)"; then
+  restore
+  # Either error may be the one that matters: which form this nix rejects is not known
+  printf '$ nix flake update devflake\n%s\n$ nix flake lock --update-input devflake\n%s\n' \
+    "$out" "$out_old" >&2
+  die "re-locking devflake at $target failed; flake.nix and flake.lock are as they were"
+fi
+new_rev="$(lock_rev)"
+
+# --- refresh the devflake-managed files, noting which of them this changes
+skill_dirs=(.claude/skills .agents/skills)
+[[ ! -d .opencode ]] || skill_dirs+=(.opencode/skills)
+managed=(AGENTS.md CLAUDE.md .gitignore)
+for skill in "$share"/skills/*/; do
+  for dir in "${skill_dirs[@]}"; do
+    managed+=("$dir/$(basename "$skill")/SKILL.md")
+  done
+done
+# digest FILE: its content hash, or - when it does not exist
+digest() { if [[ -e "$1" ]]; then sha256sum <"$1" | cut -d' ' -f1; else echo -; fi; }
+before=()
+for f in "${managed[@]}"; do before+=("$(digest "$f")"); done
+
+install_skills
+upsert_agents_block
+ensure_gitignore
+
+changed=() created=()
+for i in "${!managed[@]}"; do
+  f="${managed[$i]}"
+  [[ "$(digest "$f")" != "${before[$i]}" ]] || continue
+  changed+=("$f")
+  # Flakes ignore untracked files: make new ones visible to nix without staging their content
+  git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || created+=("$f")
+done
+((${#created[@]} == 0)) || git add --intent-to-add -- "${created[@]}"
+
+# --- report
+cat <<EOF
+
+devflake upgraded; nothing is staged or committed (review with git diff):
+  input:       $current -> $target
+  locked rev:  ${locked_rev:-(not locked)} -> ${new_rev:-(not locked)}
+  changed:     ${changed[*]:-no devflake-managed files}
+EOF
+((${#created[@]} == 0)) || echo "  new:         ${created[*]} (intent-to-add, so nix can see them)"
+# The managed files come from the devflake this command was built from, which is the newly locked
+# one only when it was run from the target
+if [[ "$rev" =~ ^[0-9a-f]{40}$ && -n "$new_rev" && "$rev" != "$new_rev" ]]; then
+  cat <<EOF
+
+  The managed files come from devflake ${rev:0:12}, which this command was built from, not from
+  the newly locked ${new_rev:0:12}. To refresh them from that version instead, run its upgrade:
+    nix run github:$owner/$repo/$new_rev#upgrade -- $ref
+EOF
+fi
+cat <<EOF
+
+Next steps:
+  1. Review and commit the changes (git status, git diff).
+  2. Re-enter the devshell (\`direnv reload\`, or exit and \`nix develop\`): the running one is
+     still the old devflake.
+  3. If the project had a herdr session of its own and the new version shares one, the old
+     server keeps running orphaned. Check \`herdr session list\`: a stale session is stopped with
+     \`herdr session stop <name>\` and removed with \`herdr session delete <name>\`.
+EOF

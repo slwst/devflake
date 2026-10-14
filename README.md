@@ -84,8 +84,8 @@ It is also on the devshell's `PATH` as `devflake-upgrade [REF] [--dry-run]`.
 | --- | --- |
 | resolve | Without a REF, the highest `vX.Y.Z` tag of the repository named in the project's current `devflake.url`, so a fork upgrades against itself. The ref is checked to exist on the remote before anything is touched. |
 | rewrite | The `devflake.url = "...";` assignment in `flake.nix`, and nothing else on any other line, becomes `github:<owner>/<repo>/<ref>`. Only `github:owner/repo` and `github:owner/repo/<ref>` inputs are rewritten; any other kind is reported and left alone. |
-| re-lock | `nix flake update devflake`. If it fails, `flake.nix` is restored, so a bad ref leaves the project as it was. |
-| refresh | The skills, the devflake block in AGENTS.md and CLAUDE.md, and the devflake lines in `.gitignore`, from the *new* devflake. New files are marked intent-to-add. |
+| re-lock | `nix flake update devflake` with the `nix` you ran it with (`nix flake lock --update-input devflake` on an older one). If it fails, `flake.nix` and `flake.lock` are restored, so a bad ref leaves the project as it was. |
+| refresh | The skills, the devflake block in AGENTS.md and CLAUDE.md, and the devflake lines in `.gitignore`, from the devflake the command was built from: the new one when it is run as `nix run github:slwst/devflake/<ref>#upgrade`, and otherwise the report says so. New files are marked intent-to-add. |
 | report | The input and the locked rev before and after, the managed files that changed, and the next steps. |
 
 It never stages or commits; review with `git diff`. Then re-enter the devshell (`direnv reload`,

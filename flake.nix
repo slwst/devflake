@@ -139,6 +139,7 @@
           text = ''
             share=${share}
             cmd=devflake-upgrade
+            rev=${self.rev or self.dirtyRev or "unknown"}
             ${builtins.readFile ./nix/project-files.sh}
             ${builtins.readFile ./nix/devflake-upgrade.sh}
           '';
