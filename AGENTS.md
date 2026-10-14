@@ -57,7 +57,7 @@ works from a clean checkout, and there is no generated lock data to regenerate b
 | --- | --- |
 | `nix flake check` | The gate before merging: builds `packages.init` and the four `herdr-*` scripts, running shellcheck on each, and checks that the `.nix` files are nixfmt-formatted. |
 | `nix build` | Builds `packages.default` (`devflake-init`); check it with `./result/bin/devflake-init --help`. |
-| `nix develop` | devflake's own devshell, which is itself a devflake shell (`self.lib.mkShell`), so it starts the herdr session `devflake`. |
+| `nix develop` | devflake's own devshell, which is itself a devflake shell (`self.lib.mkShell`), so it gives devflake a workspace in the shared herdr session. |
 | `nix fmt` | Formats the `.nix` files with nixfmt (`formatter = nixfmt-tree`). |
 | `nix flake show` | Lists the outputs; a fast evaluation-only sanity check. |
 | `nix flake update <input>` | Upgrades one pinned input (`herdr`, `claude-code`, ...). |
@@ -83,7 +83,7 @@ devflake has two audiences, and nearly every file serves one or the other:
 | Path | Role |
 | --- | --- |
 | `flake.nix` | `pkgsFor` builds devflake's own package set — the overlays pinning herdr, beady-eye, mardi-gras, openspec and claude-code — and exports `lib.mkShell`, `packages`, `checks` and `templates.default`. |
-| `nix/tools.nix` | Everything keyed on the project *name*: `herdr-up`, `herdr-down`, `herdr-captain`, `herdr-agents`, and the `shellHook` that manages the herdr server's lifetime. Imported once per `mkShell` call. |
+| `nix/tools.nix` | Everything keyed on the project *name* and its herdr *session*: `herdr-up`, `herdr-down`, `herdr-captain`, `herdr-agents`, and the `shellHook` that manages the herdr server's lifetime. Imported once per `mkShell` call. |
 | `nix/herdr-agents.sh` | The agent lifecycle: a worktree, workspace and agent per spawn, the `--loop` supervisor, `merge`, `claim`/`release`, `report`. |
 | `nix/devflake-init.sh` | Idempotent project setup: beads, flake, `.envrc`, `.gitignore`, openspec, skills, the AGENTS.md block, the bootstrap epic. |
 | `share/` | Runtime data rather than code: the captain briefing, prompt presets, the bootstrap beads, the installable skills, and the integration guide. Reachable from the shell and every herdr pane as `$DEVFLAKE_SHARE`. |
@@ -91,9 +91,15 @@ devflake has two audiences, and nearly every file serves one or the other:
 
 Two indirections are worth knowing:
 
-- **`name` threads through everything.** It is the herdr session, the label of its main workspace,
-  and the project beady-eye is told about, so `checkName` in `flake.nix` enforces
-  `[a-z][a-z0-9_-]{0,31}` up front rather than letting herdr reject it later.
+- **`name` threads through everything.** It is the label of the project's herdr workspace, the
+  prefix its agents are named with, and the project beady-eye is told about, so `checkName` in
+  `flake.nix` enforces `[a-z][a-z0-9_-]{0,31}` up front rather than letting herdr reject it later.
+- **`session` is not `name`.** Every devflake project shares the session `defaultSession`
+  (`devflake`), one workspace each, because herdr's sidebar is built to roll several projects up;
+  a project opts out with `session` in `mkShell` or `DEVFLAKE_HERDR_SESSION`. So anything the
+  tooling looks up in the session must be keyed on the repository path, not on a label or an
+  agent name — `herdr-up` finds its workspace by `worktree.checkout_path`, `herdr-agents` by
+  `herdr worktree list --cwd`, and `herdr-down` closes by `worktree.repo_root`.
 - **`share` is a store path**, so briefings and presets are versioned with the flake. The captain
   briefing is templated as it is built: `@project@` in `share/captain.md` becomes the project name.
 
@@ -102,7 +108,7 @@ Two indirections are worth knowing:
 - **Shell code lives in `nix/*.sh`, not in Nix strings.** Anything longer than a few lines is
   `builtins.readFile`-d into `writeShellApplication`, which runs shellcheck at build time and sets
   `errexit`, `nounset` and `pipefail`. The small `text = ''...''` preambles exist only to set the
-  variables a script needs (`share`, `template_dir`, `bdi_project`, ...).
+  variables a script needs (`share`, `template_dir`, `project`, ...).
 - **Declare every runtime dependency in `runtimeInputs`.** `writeShellApplication` prepends them to
   `PATH`, so a script must never rely on the user's environment. Platform-specific commands go in
   `lib.optionals stdenv.hostPlatform.isLinux` — see `herdr-up`.
@@ -207,8 +213,8 @@ bd prime                # Refresh Beads context
 ## Development environment (devflake)
 
 The devshell comes from the `devflake` flake input. `nix develop` (or direnv) provides the
-project's toolchain plus `bd` (beads), `openspec`, `claude`, `herdr` and `herdr-agents`, and
-starts the project's herdr session (attach with `herdr`).
+project's toolchain plus `bd` (beads), `openspec`, `claude`, `herdr` and `herdr-agents`, and gives
+the project a workspace in the herdr session (attach with `herdr`).
 
 - Workflow: an OpenSpec change (`openspec/changes/<change>/`) becomes a beads epic with a
   dependency graph of session-sized children (the `openspec-to-epic` skill), which agents work
@@ -224,6 +230,9 @@ starts the project's herdr session (attach with `herdr`).
   or deleting a row later does not unpublish it. Keep credentials, tokens, customer data and
   private hostnames out of beads — reference where a value lives, never the value.
 - `bd update --notes` **replaces** a bead's notes; use `--append-notes` to add to them.
+- The herdr session is shared with every other devflake project open on the host, each in its own
+  workspace, and herdr scopes nothing within a session. Panes outside this repository's workspaces
+  are not yours: check `worktree.repo_root` in `herdr workspace list` before acting on a pane.
 - The herdr tooling belongs to devflake. Project-specific agent presets go in
   `.herdr/prompts/<name>.md` (they shadow built-in presets of the same name), and notes for
   the captain tab in `.herdr/captain.md`.

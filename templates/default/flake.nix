@@ -31,8 +31,13 @@
 
         devShells.default = devflake.lib.mkShell {
           inherit pkgs;
-          # herdr session and workspace name
+          # Label of the project's herdr workspace, and the prefix its agents are named with
           name = "my-project";
+          # The herdr session that workspace lives in. The default is shared with every other
+          # devflake project on the host, so one `herdr` shows them all. Uncomment for a session
+          # of this project's own -- herdr scopes nothing within a session, so agents working
+          # here would otherwise be able to read and drive the other projects' panes.
+          # session = "my-project";
           # The project's language toolchain
           packages = [ ];
         };

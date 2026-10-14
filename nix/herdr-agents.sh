@@ -1,6 +1,6 @@
 # herdr-agents: spawn coding agents into their own git worktree + herdr workspace.
 # Packaged by devflake's nix/tools.nix via writeShellApplication (strict mode, shellcheck, runtime PATH),
-# which sets HERDR_SESSION, bdi_project and builtin_presets before this file.
+# which sets HERDR_SESSION, project and builtin_presets before this file.
 
 usage() {
   cat <<'EOF'
@@ -20,7 +20,8 @@ The agent branch tracks a parent branch (its git upstream) that `merge` delivers
 
 spawn options:
   -k, --kind KIND          agent kind passed to `herdr agent start` (default: claude)
-  -n, --name PREFIX        agent name prefix; agents are PREFIX-1, PREFIX-2, ... (default: agent)
+  -n, --name PREFIX        agent name prefix; agents are PREFIX-1, PREFIX-2, ... (default: the
+                           project name, since agent names are unique across the herdr session)
   -b, --base REF           start branches from REF (default: the parent branch, else HEAD)
       --parent BRANCH      branch agents merge into (default: --base if it is a local branch,
                            else the branch checked out in the repo root)
@@ -89,6 +90,10 @@ self_bin="$(dirname "$(readlink -f "$0")")"
 state_dir="$root/.git/herdr-agents"
 # Project presets; a project preset shadows the built-in preset of the same name
 presets="$root/.herdr/prompts"
+# Agent names are unique across the herdr session, which every devflake project shares by default,
+# so they carry the project: devflake-1, vaporware-1, ... (-n overrides). 27 characters leaves room
+# for the -<index> suffix.
+default_prefix="$(printf '%.27s' "$project" | sed -E 's/[_-]+$//')"
 
 # Error code from a herdr CLI JSON error (printed on stderr), or empty
 herdr_error_code() {
@@ -96,7 +101,7 @@ herdr_error_code() {
 }
 
 cmd_spawn() {
-  local count=1 kind=claude prefix=agent base="" parent="" timeout=120000
+  local count=1 kind=claude prefix="$default_prefix" base="" parent="" timeout=120000
   local prompt="" prompt_src="" loop=0 rm_on_empty=0
   local -a agent_args=()
 
@@ -619,7 +624,7 @@ cmd_supervise() {
 bdi_changed() {
   local sock="${XDG_RUNTIME_DIR:-}/beady-eye/changes.sock"
   [[ -S "$sock" ]] || return 0
-  printf '%s\n' "$bdi_project" | socat - UNIX-CONNECT:"$sock" >/dev/null 2>&1 || true
+  printf '%s\n' "$project" | socat - UNIX-CONNECT:"$sock" >/dev/null 2>&1 || true
 }
 
 # This pane and the source tag herdr metadata is reported under (herdr:<agent kind>)
