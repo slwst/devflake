@@ -110,6 +110,11 @@ let
           # only -- the shellHook above still needs DIRENV_IN_ENVRC to tell a direnv load (no exit
           # hook, so no herdr-down) from an interactive nix develop.
           unset DIRENV_DIR DIRENV_DIFF DIRENV_FILE DIRENV_WATCHES DIRENV_IN_ENVRC
+          # Nor the devshell's scratch directory. nix develop points TMPDIR (and NIX_BUILD_TOP) at a
+          # /tmp/nix-shell.* directory that is removed when that shell exits or direnv reloads; the
+          # server outlives it, so its panes and agents would be left with a TMPDIR that no longer
+          # exists and mktemp fails. Fall back to /tmp like any other long-lived daemon.
+          unset TMPDIR TMP TEMP TEMPDIR NIX_BUILD_TOP
           cd "$root"
           # Panes run $SHELL, which the devshell has replaced with stdenv's bash; use the login shell
           if [[ -n "''${DEVFLAKE_HERDR_SHELL:-}" ]]; then
