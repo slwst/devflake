@@ -55,7 +55,7 @@ works from a clean checkout, and there is no generated lock data to regenerate b
 
 | Command | What it does |
 | --- | --- |
-| `nix flake check` | The gate before merging: builds `packages.init` and the four `herdr-*` scripts, running shellcheck on each, and checks that the `.nix` files are nixfmt-formatted. |
+| `nix flake check` | The gate before merging: builds `packages.init`, `packages.upgrade` and the four `herdr-*` scripts, running shellcheck on each, and checks that the `.nix` files are nixfmt-formatted. |
 | `nix build` | Builds `packages.default` (`devflake-init`); check it with `./result/bin/devflake-init --help`. |
 | `nix develop` | devflake's own devshell, which is itself a devflake shell (`self.lib.mkShell`), so it gives devflake a workspace in the shared herdr session. |
 | `nix fmt` | Formats the `.nix` files with nixfmt (`formatter = nixfmt-tree`). |
@@ -67,7 +67,7 @@ works from a clean checkout, and there is no generated lock data to regenerate b
 - `nix flake check` checks the current system only. `--all-systems` also evaluates the darwin and
   aarch64 outputs, which need a builder for those systems to go further than evaluation.
 - There is no test suite beyond the checks. Shellcheck catches quoting and syntax, not behaviour,
-  so after changing `nix/herdr-agents.sh` or `nix/devflake-init.sh` run the command from a devshell
+  so after changing `nix/herdr-agents.sh`, `nix/devflake-init.sh` or `nix/devflake-upgrade.sh` run the command from a devshell
   as well as `nix flake check`.
 - `DEVFLAKE_HERDR=0 nix develop` gives the tools without starting a herdr server.
 - Three of beady-eye's tests are skipped on darwin, in an overlay in `flake.nix` that explains why.
@@ -86,6 +86,8 @@ devflake has two audiences, and nearly every file serves one or the other:
 | `nix/tools.nix` | Everything keyed on the project *name* and its herdr *session*: `herdr-up`, `herdr-down`, `herdr-captain`, `herdr-agents`, and the `shellHook` that manages the herdr server's lifetime. Imported once per `mkShell` call. |
 | `nix/herdr-agents.sh` | The agent lifecycle: a worktree, workspace and agent per spawn, the `--loop` supervisor, `merge`, `claim`/`release`, `report`. |
 | `nix/devflake-init.sh` | Idempotent project setup: beads, flake, `.envrc`, `.gitignore`, openspec, skills, the AGENTS.md block, the bootstrap epic. |
+| `nix/devflake-upgrade.sh` | Moves a project's `devflake` input to a newer ref (the latest tag by default), re-locks it and refreshes the managed files. |
+| `nix/project-files.sh` | The devflake-managed project files — skills, the AGENTS.md/CLAUDE.md block, the `.gitignore` lines — as shell functions sourced by init and upgrade. |
 | `share/` | Runtime data rather than code: the captain briefing, prompt presets, the bootstrap beads, the installable skills, and the integration guide. Reachable from the shell and every herdr pane as `$DEVFLAKE_SHARE`. |
 | `templates/default/` | The `flake.nix` and `.envrc` that `devflake-init` (and `nix flake init -t`) writes into a project. |
 
@@ -114,9 +116,10 @@ Two indirections are worth knowing:
   `lib.optionals stdenv.hostPlatform.isLinux` — see `herdr-up`.
 - **Escaping**: inside a Nix indented string a shell variable is `''${VAR}`, while `${...}` is Nix
   interpolation. Prefer interpolating a store path in over computing it in shell.
-- **`devflake-init` must stay rerunnable.** Every step checks whether it has already run, because
-  rerunning it is also how a project picks up a devflake upgrade (it refreshes the managed skill and
-  the AGENTS.md block). It must never overwrite a file the project owns.
+- **`devflake-init` must stay rerunnable.** Every step checks whether it has already run, and it
+  must never overwrite a file the project owns. A project moves to a newer devflake with
+  `devflake-upgrade`, which refreshes the managed files through the same `nix/project-files.sh`
+  functions as init, so the two never hold separate copies of them.
 - **The managed block.** devflake owns the text between the `<!-- BEGIN DEVFLAKE -->` markers in a
   project's AGENTS.md and CLAUDE.md (`share/agents-block.md`); everything outside those markers
   belongs to the project. The bootstrap epic's last bead is what fills in the project's own
@@ -209,7 +212,7 @@ bd prime                # Refresh Beads context
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
 
-<!-- BEGIN DEVFLAKE (managed by devflake-init; rerun it to update, edit outside this block) -->
+<!-- BEGIN DEVFLAKE (managed by devflake; devflake-upgrade refreshes it, edit outside this block) -->
 ## Development environment (devflake)
 
 The devshell comes from the `devflake` flake input. `nix develop` (or direnv) provides the
@@ -219,6 +222,8 @@ the project a workspace in the herdr session (attach with `herdr`).
 - Workflow: an OpenSpec change (`openspec/changes/<change>/`) becomes a beads epic with a
   dependency graph of session-sized children (the `openspec-to-epic` skill), which agents work
   through in parallel (`herdr-agents spawn N --preset bd-epic --var epic=<id> --loop`).
+- devflake moves with `nix run github:slwst/devflake#upgrade [REF]`, not a hand edit of the
+  `devflake` input in `flake.nix`: it also refreshes this block and the devflake skills.
 - `nix flake check` is the gate before merging: it runs the tests and linters offline in the Nix
   sandbox. `nix build` builds the project.
 - Nix only sees files git tracks: `git add` new files before `nix build` or `nix flake check`.

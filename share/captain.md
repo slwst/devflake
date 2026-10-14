@@ -108,9 +108,13 @@ herdr-agents presets                      # presets (project and built-in) and t
 - The captain tab resumes the root's last conversation (`claude --continue`), so a briefing
   change only reaches a new one: `DEVFLAKE_CAPTAIN_NEW=1` on entry, or `herdr-captain --new`.
 - Run herdr commands with the devshell's `herdr`, because its version must match the server.
-- After `nix flake update devflake`, the current shell's PATH still has the old build. Run the
-  new one with `nix develop --command herdr-agents ...`. Panes of newly spawned agents get the
-  build that spawned them.
+- devflake moves with `nix run github:slwst/devflake#upgrade [REF]` (latest release tag by
+  default), which rewrites the `devflake` input, re-locks it and refreshes the managed files,
+  never committing. Propose it rather than hand-editing `flake.nix`, and run it only when the
+  user asks.
+- After an upgrade, the current shell's PATH still has the old build until the devshell is
+  re-entered. Run the new one with `nix develop --command herdr-agents ...`. Panes of newly
+  spawned agents get the build that spawned them.
 
 ## Observing agents
 

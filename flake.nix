@@ -118,7 +118,30 @@
           text = ''
             share=${share}
             template_dir=${./templates/default}
+            ${builtins.readFile ./nix/project-files.sh}
             ${builtins.readFile ./nix/devflake-init.sh}
+          '';
+        };
+
+      # Runs from outside the project's devshell, which is what it replaces, so it relies on
+      # nothing but its runtimeInputs
+      mkUpgrade =
+        p:
+        p.writeShellApplication {
+          name = "devflake-upgrade";
+          runtimeInputs = [
+            p.coreutils
+            p.git
+            p.gnugrep
+            p.gnused
+            p.jq
+          ];
+          text = ''
+            share=${share}
+            cmd=devflake-upgrade
+            rev=${self.rev or self.dirtyRev or "unknown"}
+            ${builtins.readFile ./nix/project-files.sh}
+            ${builtins.readFile ./nix/devflake-upgrade.sh}
           '';
         };
     in
@@ -163,7 +186,14 @@
             ]
             // {
               name = "${name}-devshell";
-              packages = basePackages p ++ tools.packages ++ [ (mkInit p) ] ++ packages;
+              packages =
+                basePackages p
+                ++ tools.packages
+                ++ [
+                  (mkInit p)
+                  (mkUpgrade p)
+                ]
+                ++ packages;
               shellHook = tools.shellHook + shellHook;
             }
           );
@@ -187,12 +217,13 @@
       let
         p = pkgsFor system;
         init = mkInit p;
+        upgrade = mkUpgrade p;
         tools = mkTools system "devflake" defaultSession;
       in
       {
         packages = {
           default = init;
-          inherit init;
+          inherit init upgrade;
           inherit (p)
             beads
             beady-eye
@@ -206,7 +237,7 @@
 
         # writeShellApplication runs shellcheck on each script while building it
         checks = {
-          inherit init;
+          inherit init upgrade;
           inherit (tools)
             herdr-agents
             herdr-captain
