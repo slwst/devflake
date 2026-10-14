@@ -229,6 +229,9 @@ the project a workspace in the herdr session (attach with `herdr`).
   possibly public; no flag withholds memories from a push, and a push ships history, so editing
   or deleting a row later does not unpublish it. Keep credentials, tokens, customer data and
   private hostnames out of beads — reference where a value lives, never the value.
+- Publish beads the first time with `bd dolt push`, which creates `refs/dolt/data` on the remote;
+  `bd sync` fails until it exists. Use `bd sync` thereafter: it pulls, checks for conflicts and
+  pushes with retry, so it copes with another replica having moved the remote.
 - `bd update --notes` **replaces** a bead's notes; use `--append-notes` to add to them.
 - The herdr session is shared with every other devflake project open on the host, each in its own
   workspace, and herdr scopes nothing within a session. Panes outside this repository's workspaces
