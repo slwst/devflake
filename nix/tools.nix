@@ -91,6 +91,13 @@ let
             fd="''${fd##*/}"
             if ((fd > 2)); then eval "exec $fd>&-"; fi
           done 2>/dev/null
+          # Nor any of the caller's direnv state. When direnv starts the server (this runs from
+          # inside the root .envrc), the server and every pane and agent under it would otherwise
+          # inherit DIRENV_DIR and DIRENV_DIFF naming the repo root: a pane's own direnv hook then
+          # sees a diff for a directory it is not in and unloads it. Unset inside this subshell
+          # only -- the shellHook above still needs DIRENV_IN_ENVRC to tell a direnv load (no exit
+          # hook, so no herdr-down) from an interactive nix develop.
+          unset DIRENV_DIR DIRENV_DIFF DIRENV_FILE DIRENV_WATCHES DIRENV_IN_ENVRC
           cd "$root"
           # Panes run $SHELL, which the devshell has replaced with stdenv's bash; use the login shell
           if [[ -n "''${DEVFLAKE_HERDR_SHELL:-}" ]]; then
