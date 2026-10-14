@@ -195,6 +195,11 @@ cmd_spawn() {
       die "failed to create worktree for $name"
     pane="$(jq -r '.result.root_pane.pane_id' <<<"$created")"
     workspace="$(jq -r '.result.workspace.workspace_id' <<<"$created")"
+    # Immediately, because `herdr worktree create` has already started the pane's shell: its first
+    # prompt may have run the direnv hook and unloaded the inherited devshell. Approving now means
+    # the hook loads the worktree's own devshell on the next prompt, which `start_agent`'s pane
+    # command provides, before `herdr agent start` launches the agent in that shell.
+    approve_worktree_envrc "$name"
     # The upstream records which branch `herdr-agents merge` delivers to
     if [[ -n "$parent" ]]; then
       git -C "$root" branch --quiet --set-upstream-to="$parent" "agents/$name"
@@ -235,6 +240,35 @@ render_prompt() {
     text="${text//\{\{$key\}\}/${prompt_vars[$key]}}"
   done
   printf '%s' "$text"
+}
+
+# approve_worktree_envrc NAME: let the agent's pane load the worktree's devshell.
+#
+# direnv approves an .envrc by path, so a worktree's copy is a new, unapproved path. Left
+# unapproved, the pane's direnv hook unloads the root devshell it inherited (DIRENV_DIFF still
+# names the root) and loads nothing in its place, so the agent runs on the plain login PATH: no
+# bd, no project toolchain, and whatever claude the login profile happens to carry rather than the
+# one this flake pins. Approving it extends no trust, because it is the same tracked .envrc as the
+# root's, which the user has already allowed.
+#
+# Deliberately uses the direnv on PATH rather than a pinned one: the approval store is per-user
+# and keyed by that binary's own hashing, so an approval written by a different build is one the
+# user's hook would not honour.
+#
+# A silent no-op when direnv is absent or the root is not approved -- there is then no hook in the
+# pane either, so the inherited devshell PATH survives and nothing needs fixing.
+approve_worktree_envrc() {
+  # Not `status`: that name is a readonly special variable in zsh, and panes run the login shell
+  local name="$1" wt="$worktrees/$1" root_status
+  command -v direnv >/dev/null || return 0
+  [[ -f "$wt/.envrc" ]] || return 0
+  # --json, not a grep over `direnv status`: its wording and its allow-state encoding have both
+  # changed between releases (2.37 prints `allowed 0` where older builds printed `allowed true`),
+  # and a mismatch there would disable this with no symptom except the bug coming back.
+  root_status="$(cd "$root" && direnv status --json 2>/dev/null)" || return 0
+  jq -e '.state.foundRC.allowed == 0' <<<"$root_status" >/dev/null 2>&1 || return 0
+  direnv allow "$wt" >/dev/null 2>&1 ||
+    echo "$name: could not approve $wt/.envrc; the agent may start without the devshell" >&2
 }
 
 # start_agent NAME PANE WORKSPACE KIND TIMEOUT PROMPT LOOP [AGENT_ARGS...]
