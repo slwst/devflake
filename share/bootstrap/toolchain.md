@@ -1,0 +1,7 @@
+# Survey the project and provide its toolchain in the devshell
+Work out how this project is built and tested today, choose the Nix packaging approach, and put the toolchain in the devshell.
+
+1. Survey: languages and versions, build tool and lockfiles (go.mod/go.sum, Cargo.lock, package-lock.json/pnpm-lock.yaml/yarn.lock, uv.lock/poetry.lock/requirements*.txt, pom.xml/build.gradle, Makefile, ...), how tests and linters are run (CI config, Makefile, package scripts, README), and what the build produces (binaries, libraries, images, sites). Note services tests need (databases, browsers) and whether they can run in the Nix sandbox.
+2. Choose the packaging approach for `packages.default` and the checks, using `$DEVFLAKE_SHARE/docs/integrating.md`: e.g. gomod2nix or buildGoModule, crane, buildNpmPackage or importNpmLock, uv2nix, buildMavenPackage. Add any flake inputs it needs (with `inputs.nixpkgs.follows = "nixpkgs"` where supported) and run `nix flake lock`.
+3. Add the toolchain and the dev tools the project's workflow uses (compiler/runtime, package manager, lockfile-to-nix generator, linters, formatters) to `packages` of `devflake.lib.mkShell` in flake.nix. Pin versions to match the project's declared versions where nixpkgs allows.
+4. Record the survey and the chosen approach as a comment on the epic so later beads start from it: `bd comments add <epic-id> "..."` (the epic is this bead's parent; see `bd show <this-id>`).
