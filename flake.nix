@@ -118,6 +118,7 @@
           text = ''
             share=${share}
             template_dir=${./templates/default}
+            ${builtins.readFile ./nix/project-files.sh}
             ${builtins.readFile ./nix/devflake-init.sh}
           '';
         };
