@@ -132,6 +132,18 @@ Two indirections are worth knowing:
 - **Agents must not commit `.beads/`.** Every worktree shares the root's beads database, and
   `herdr-agents merge` refuses a branch that touches it (exit status 4).
 
+## Releasing
+
+A release is a `vX.Y.Z` tag on `main`; `devflake-upgrade` takes the highest one as "latest".
+
+1. Before tagging, bump the release named in README.md to the new tag, in the same commit (or
+   merge) the tag will point at. README pins every `nix run`, `nix flake init -t` and
+   `inputs.devflake.url` example to it, because an unpinned `github:` ref can be served stale
+   from nix's cache. `grep -n 'slwst/devflake/v' README.md` lists them; all should agree.
+2. `nix flake check` on that commit.
+3. Tag that commit and push the tag. A tag that is moved later does not move a locked project,
+   but anyone who ran the README's commands in between ran the old commit.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker
 
