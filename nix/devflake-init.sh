@@ -121,12 +121,19 @@ else
 
   inputs.devflake.url = "$(sed -n 's/^ *devflake\.url = "\(.*\)";/\1/p' "$template_dir/flake.nix")";
 
-  devShells.default = devflake.lib.mkShell {
+  devShells.\${system}.default = inputs.devflake.lib.mkShell {
     inherit pkgs;
     name = "$name";
     packages = [ /* the toolchain your current devShell provides */ ];
     # inputsFrom, env vars and shellHook are passed through to pkgs.mkShell
   };
+
+  # \`inputs\` is the outputs function's argument set (\`{ self, nixpkgs, ... } @ inputs:\`),
+  # so this works whether or not the flake destructures its inputs. Inside flake-utils'
+  # eachDefaultSystem, write \`devShells.default\` instead. mkShell reads only pkgs and
+  # pkgs.stdenv.hostPlatform.system, so pass the per-system pkgs the flake already builds:
+  # its nixpkgs config (overlays, allowUnfree) does not matter here, since the agent tools
+  # come from devflake's own pkgs.
 
 EOF
 fi
