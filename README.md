@@ -63,7 +63,7 @@ use `devflake-upgrade` (below) rather than rerunning init.
 | `openspec init` | `openspec/` plus the opsx commands and skills for `--tools` (default `claude,codex,opencode`) |
 | skills | `openspec-to-epic` in `.claude/skills`, `.agents/skills` (and `.opencode/skills`) |
 | AGENTS.md | a devflake block (also in CLAUDE.md), replaced on every run |
-| bootstrap | for a project with files of its own (`--bootstrap`/`--no-bootstrap` to force), the `devflake-bootstrap` epic |
+| bootstrap | for a project with files of its own whose flake does not already build it (`--bootstrap`/`--no-bootstrap` to force), the `devflake-bootstrap` epic |
 
 New files are marked intent-to-add in git so Nix can see them; nothing else is staged or committed.
 
