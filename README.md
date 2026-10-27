@@ -113,7 +113,7 @@ Pin devflake with a tag, as above: the third path component of a `github:` flake
 moved tag never silently changes a locked project. `devflake-upgrade` moves the pin and the lock
 together and refreshes the managed files; a hand edit plus `nix flake update devflake` leaves the
 managed files behind. Language recipes for `packages.default` and
-`checks` (Go, Rust, Node, Python, JVM) are in [share/docs/integrating.md](share/docs/integrating.md),
+`checks` (Go, Rust, Node, Python, JVM, and projects that already are flakes) are in [share/docs/integrating.md](share/docs/integrating.md),
 also available in the devshell as `$DEVFLAKE_SHARE/docs/integrating.md`.
 
 ## Devshell

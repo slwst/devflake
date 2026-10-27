@@ -12,6 +12,10 @@ state:
 `nix flake check` is the gate the agent presets run before every merge, so it must be
 meaningful (it fails when tests or linters fail) and reasonably fast.
 
+When the project's deliverable already is a flake (NixOS, home-manager or nix-darwin
+configurations, an overlay, a flake of packages), most of this page does not apply: see
+[The project is already a flake](#the-project-is-already-a-flake).
+
 ## Principles
 
 - **Dependencies come from the lockfile, never the network at build time.** Each ecosystem has
@@ -126,3 +130,64 @@ layer once from `Cargo.lock`, and `buildPackage`, `cargoClippy`, `cargoNextest`/
 When no ecosystem tool fits, a check can still wrap the project's own test command, as long as
 dependencies are fetched by a fixed-output derivation (known hash) rather than during the
 check. Record the trade-off in AGENTS.md.
+
+## The project is already a flake
+
+A NixOS, home-manager or nix-darwin configuration, an overlay or a flake of packages already
+builds with Nix, so the table above maps onto it loosely:
+
+- **There is no lockfile-to-Nix step.** Dependencies already come from `flake.lock`, so the
+  bootstrap toolchain bead has nothing to choose; record that on the epic and close it.
+- **`packages.default` may legitimately be absent.** A configuration flake's artifacts are
+  `nixosConfigurations.<host>.config.system.build.toplevel` (or
+  `homeConfigurations.<name>.activationPackage`, `darwinConfigurations.<host>.system`), not one
+  main package. Leave `packages.default` unset rather than pointing it at something arbitrary,
+  and close the bootstrap build bead as not applicable. A flake of packages keeps whatever
+  `packages` it already has.
+- **The meaningful checks** are the formatter in `--check` mode (whichever one the flake
+  declares as its `formatter`: alejandra, nixfmt), each configuration's build, and optionally
+  [statix](https://github.com/oppiliappan/statix) and
+  [deadnix](https://github.com/astro/deadnix):
+
+```nix
+checks = {
+  fmt = pkgs.runCommand "fmt-check" { nativeBuildInputs = [ pkgs.alejandra ]; } ''
+    alejandra --check ${./.} && touch $out
+  '';
+  # nixfmt instead: nativeBuildInputs = [ pkgs.nixfmt-rfc-style ]; nixfmt --check $(find ${./.} -name '*.nix')
+  statix = pkgs.runCommand "statix-check" { nativeBuildInputs = [ pkgs.statix ]; } ''
+    statix check ${./.} && touch $out
+  '';
+  deadnix = pkgs.runCommand "deadnix-check" { nativeBuildInputs = [ pkgs.deadnix ]; } ''
+    deadnix --fail ${./.} && touch $out
+  '';
+  laptop = self.nixosConfigurations.laptop.config.system.build.toplevel;
+  server = self.nixosConfigurations.server.config.system.build.toplevel;
+};
+```
+
+A `toplevel` in `checks` makes `nix flake check` build the whole system closure. That is the
+real gate, and it is slow. `nix flake check` already evaluates every
+`nixosConfigurations.<host>` (it does not build them), and evaluating the derivation path:
+
+```sh
+nix eval .#nixosConfigurations.laptop.config.system.build.toplevel.drvPath
+```
+
+catches module and option errors in seconds. For a repo whose agents run the gate often, that is
+usually the right trade: leave the toplevels out of `checks`, or evaluate them there without
+building them,
+
+```nix
+laptop = pkgs.writeText "laptop-drv"
+  (builtins.unsafeDiscardStringContext
+    self.nixosConfigurations.laptop.config.system.build.toplevel.drvPath);
+```
+
+and build the closures in CI or before deploying. `nix flake check` does not know
+`homeConfigurations`, so a home-manager profile is only evaluated if `checks` names it the same
+way (`self.homeConfigurations.<name>.activationPackage`).
+
+The formatter check and the repo's existing formatting usually disagree on first contact: a repo
+that has never run `nix fmt` in CI needs one reformat commit before the check can go in. Give it
+its own bead, so the reformat is not mixed into the integration.
