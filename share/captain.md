@@ -25,7 +25,7 @@ and takes precedence over it.
 
 ## Workflow: spec -> epic -> agents
 
-1. **Bootstrap (existing projects).** `devflake-init` creates an epic labelled
+1. **Bootstrap (existing projects).** Unless the flake already builds the project, `devflake-init` creates an epic labelled
    `devflake-bootstrap` whose children bring the project's toolchain into the devshell, its
    build into `packages.default`, and its tests and linters into `nix flake check`. Its children
    form a chain, so one agent is enough:

@@ -21,14 +21,17 @@ Each step is skipped when already done:
   skills        openspec-to-epic, into .claude/skills, .agents/skills (and .opencode/skills)
   AGENTS.md     the devflake block, also in CLAUDE.md (replaced on every run)
   bootstrap     for an existing project, an epic (label devflake-bootstrap) whose beads bring its
-                build and tests into the flake
+                build and tests into the flake; skipped when its flake already provides
+                packages.default and checks, or is the project itself (nixosConfigurations,
+                homeConfigurations or darwinConfigurations, with no language lockfile)
 
 Options:
   --name NAME       herdr workspace label and agent name prefix (default: the repo directory,
                     sanitized)
   --prefix PREFIX   beads issue prefix for `bd init` (default: bd's, the directory name)
   --tools LIST      openspec agent tools (default: claude,codex,opencode)
-  --bootstrap       create the bootstrap epic even if the project looks new
+  --bootstrap       create the bootstrap epic even if the project looks new or already
+                    builds with nix
   --no-bootstrap    never create the bootstrap epic
   -h, --help        show this help
 EOF
@@ -67,6 +70,8 @@ scaffold_re='^$|^(\.gitignore|\.envrc|flake\.(nix|lock)|result.*|README[^/]*|LIC
 project_files="$(git ls-files --cached --others --exclude-standard | grep -vE "$scaffold_re" || true)"
 existing=0
 [[ -z "$project_files" ]] || existing=1
+had_flake=0
+[[ ! -e flake.nix ]] || had_flake=1
 
 created=()
 
@@ -116,12 +121,19 @@ else
 
   inputs.devflake.url = "$(sed -n 's/^ *devflake\.url = "\(.*\)";/\1/p' "$template_dir/flake.nix")";
 
-  devShells.default = devflake.lib.mkShell {
+  devShells.\${system}.default = inputs.devflake.lib.mkShell {
     inherit pkgs;
     name = "$name";
     packages = [ /* the toolchain your current devShell provides */ ];
     # inputsFrom, env vars and shellHook are passed through to pkgs.mkShell
   };
+
+  # \`inputs\` is the outputs function's argument set (\`{ self, nixpkgs, ... } @ inputs:\`),
+  # so this works whether or not the flake destructures its inputs. Inside flake-utils'
+  # eachDefaultSystem, write \`devShells.default\` instead. mkShell reads only pkgs and
+  # pkgs.stdenv.hostPlatform.system, so pass the per-system pkgs the flake already builds:
+  # its nixpkgs config (overlays, allowUnfree) does not matter here, since the agent tools
+  # come from devflake's own pkgs.
 
 EOF
 fi
@@ -160,7 +172,52 @@ bead() {
   shift
   bd create "$(head -n1 "$f" | sed 's/^# *//')" -d "$(tail -n +2 "$f")" --silent "$@"
 }
+# nix_build_status: why the project's flake needs no bootstrap epic, or nothing when it may.
+# The epic's beads bring a project wrapped by nix into the flake, so they are stale for one whose
+# flake already provides packages.default and checks, and have no referent for one where nix is
+# the project (a NixOS, home-manager or darwin configuration). Either half of the second test
+# alone misreads: a Go project may ship a configuration, and a nix-native repo may vendor a
+# derivation with its own Cargo.lock below the root.
+nix_build_status() {
+  ((had_flake)) && command -v nix >/dev/null || return 0
+  local probe
+  # shellcheck disable=SC2016 # a nix expression, not shell
+  probe='root: let
+    f = builtins.getFlake root;
+    s = builtins.currentSystem;
+    has = n: f ? ${n};
+  in {
+    default = has "packages" && f.packages ? ${s} && f.packages.${s} ? default;
+    checks = has "checks" && f.checks ? ${s} && f.checks.${s} != { };
+    configs = builtins.filter has [ "nixosConfigurations" "homeConfigurations" "darwinConfigurations" ];
+  }'
+  note "checking what the existing flake builds (nix eval)" >&2
+  local out
+  if ! out="$(nix --extra-experimental-features 'nix-command flakes' eval --impure --json \
+    --expr "($probe) \"git+file://$root\"" 2>/dev/null)"; then
+    note "could not evaluate flake.nix; treating the project as not yet built with nix" >&2
+    return 0
+  fi
+  if [[ "$(jq -r '.default and .checks' <<<"$out")" == true ]]; then
+    echo "already builds with nix (packages.default, checks)"
+    return 0
+  fi
+  local configs lockfile_re='^(go\.mod|Cargo\.lock|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|uv\.lock|poetry\.lock|requirements[^/]*\.txt|pom\.xml|build\.gradle(\.kts)?)$'
+  configs="$(jq -r '.configs | join(", ")' <<<"$out")"
+  # Not grep -q on the pipe: under pipefail, git's SIGPIPE would read as no lockfile found
+  if [[ -n "$configs" ]] && ! grep -E "$lockfile_re" <<<"$project_files" >/dev/null; then
+    echo "is itself nix ($configs, and no language lockfile at its root)"
+  fi
+}
+
 epic=""
+if [[ "$bootstrap" == auto && "$existing" == 1 ]]; then
+  nix_status="$(nix_build_status)"
+  if [[ -n "$nix_status" ]]; then
+    note "this project $nix_status; no bootstrap epic. Pass --bootstrap to create one anyway."
+    bootstrap=no
+  fi
+fi
 if [[ "$bootstrap" == yes || ("$bootstrap" == auto && "$existing" == 1) ]]; then
   epic="$(bd list --all --type epic --label devflake-bootstrap --json | jq -r '.[0].id // empty')"
   if [[ -n "$epic" ]]; then

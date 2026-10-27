@@ -25,19 +25,24 @@ the agent tooling, pinned by devflake's own lock.
    with a dependency graph of session-sized beads (the `openspec-to-epic` skill), and schedule
    agents onto it (`herdr-agents spawn N --preset bd-epic --var epic=<id> --loop`). The captain
    tab is briefed to drive all of this.
-4. **Upgrade.** `nix run github:slwst/devflake#upgrade` moves the project to devflake's latest
-   release tag and refreshes the devflake-managed files.
+4. **Upgrade.** `nix run github:slwst/devflake/v0.2.0#upgrade` moves the project to devflake's
+   latest release tag and refreshes the devflake-managed files.
 
 ## Quick start
 
 From the project's root (new or existing; a directory without git gets `git init`):
 
 ```bash
-nix run github:slwst/devflake#init
+nix run github:slwst/devflake/v0.2.0#init
 git status                      # review; bd init has already committed its own files
 direnv allow                    # or: nix develop
 herdr                           # attach to the project's herdr session
 ```
+
+The commands in this README name the release they describe, `v0.2.0`. An unpinned
+`github:slwst/devflake` is served from nix's fetch cache for up to an hour (`tarball-ttl`), so it
+can run an older devflake than the one on GitHub, which fails on a missing attribute rather than
+saying so; a tag is a cache entry of its own. With the unpinned form, add `--refresh`.
 
 For an existing project, init prints the bootstrap epic's id. Ask the captain to schedule it, or
 run:
@@ -46,7 +51,7 @@ run:
 herdr-agents spawn --preset bd-epic --var epic=<id> --loop --rm-on-empty
 ```
 
-Alternatively `nix flake init -t github:slwst/devflake`
+Alternatively `nix flake init -t github:slwst/devflake/v0.2.0`
 writes just `flake.nix` and `.envrc`; then run `nix develop --command devflake-init`.
 
 ### What `devflake-init` does
@@ -63,7 +68,7 @@ use `devflake-upgrade` (below) rather than rerunning init.
 | `openspec init` | `openspec/` plus the opsx commands and skills for `--tools` (default `claude,codex,opencode`) |
 | skills | `openspec-to-epic` in `.claude/skills`, `.agents/skills` (and `.opencode/skills`) |
 | AGENTS.md | a devflake block (also in CLAUDE.md), replaced on every run |
-| bootstrap | for a project with files of its own (`--bootstrap`/`--no-bootstrap` to force), the `devflake-bootstrap` epic |
+| bootstrap | for a project with files of its own whose flake does not already build it (`--bootstrap`/`--no-bootstrap` to force), the `devflake-bootstrap` epic |
 
 New files are marked intent-to-add in git so Nix can see them; nothing else is staged or committed.
 
@@ -73,10 +78,16 @@ From the project's root, like init, and from outside the devshell if you like (t
 what is being replaced, so the command depends on nothing it provides):
 
 ```bash
-nix run github:slwst/devflake#upgrade            # the latest release tag
-nix run github:slwst/devflake#upgrade v0.2.0     # a specific ref: a tag, a branch or a commit
-nix run github:slwst/devflake#upgrade -- --dry-run   # report current input, locked rev and target
+nix run github:slwst/devflake/v0.2.0#upgrade                # the latest release tag
+nix run github:slwst/devflake/<ref>#upgrade <ref>           # a specific ref: a tag, a branch or a commit
+nix run github:slwst/devflake/v0.2.0#upgrade -- --dry-run   # report current input, locked rev and target
 ```
+
+The ref after `devflake/` picks which devflake runs the command; the argument after `#upgrade`
+picks what the project moves to. Without an argument the target is the highest release tag,
+which the command looks up with `git ls-remote`, so it finds a release newer than the one it was
+run as. Naming the same ref in both places also makes the refreshed files come from the target
+(the refresh step, below).
 
 It is also on the devshell's `PATH` as `devflake-upgrade [REF] [--dry-run]`.
 
@@ -97,7 +108,7 @@ session of its own and the new version shares one, the old server keeps running;
 ## Using devflake in a flake
 
 ```nix
-inputs.devflake.url = "github:slwst/devflake/v0.1.0";
+inputs.devflake.url = "github:slwst/devflake/v0.2.0";
 
 devShells.default = devflake.lib.mkShell {
   inherit pkgs;              # the project's nixpkgs; provides mkShell
@@ -113,7 +124,7 @@ Pin devflake with a tag, as above: the third path component of a `github:` flake
 moved tag never silently changes a locked project. `devflake-upgrade` moves the pin and the lock
 together and refreshes the managed files; a hand edit plus `nix flake update devflake` leaves the
 managed files behind. Language recipes for `packages.default` and
-`checks` (Go, Rust, Node, Python, JVM) are in [share/docs/integrating.md](share/docs/integrating.md),
+`checks` (Go, Rust, Node, Python, JVM, and projects that already are flakes) are in [share/docs/integrating.md](share/docs/integrating.md),
 also available in the devshell as `$DEVFLAKE_SHARE/docs/integrating.md`.
 
 ## Devshell
