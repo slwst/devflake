@@ -9,6 +9,22 @@ die() {
 }
 note() { echo "${cmd:-devflake-init}: $*"; }
 
+# gitignore_has LINE: whether .gitignore already carries LINE or an obvious spelling of it -- the
+# pattern without its leading / anchor, without its trailing dir/ slash, or both. /result and
+# /result-* also accept result*, which covers both. Deliberately no more than that: this is a
+# check against duplicating a line, not an implementation of gitignore matching.
+gitignore_has() {
+  local bare=${1#/}
+  bare=${bare%/}
+  local spellings=("$1" "$bare" "/$bare" "$bare/" "/$bare/")
+  case $1 in /result | /result-*) spellings+=('result*' '/result*') ;; esac
+  local s
+  for s in "${spellings[@]}"; do
+    grep -qxF -- "$s" .gitignore 2>/dev/null && return 0
+  done
+  return 1
+}
+
 # ensure_gitignore: append the devflake ignore lines that .gitignore lacks, under one comment
 ensure_gitignore() {
   local line ignored=()
@@ -16,7 +32,7 @@ ensure_gitignore() {
   # when export.auto is on), and `herdr-agents merge` refuses a branch that touches .beads/, so
   # tracking it would make every agent branch unmergeable.
   for line in /.worktrees/ .direnv/ /result /result-* .beads/issues.jsonl; do
-    if ! grep -qxF -- "$line" .gitignore 2>/dev/null; then
+    if ! gitignore_has "$line"; then
       ignored+=("$line")
     fi
   done
